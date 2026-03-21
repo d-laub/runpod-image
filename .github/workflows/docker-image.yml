@@ -15,17 +15,34 @@ on:
       - .github/workflows/docker-image.yml
   workflow_dispatch:
 
-concurrency:
-  group: docker-image-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   packages: write
 
 jobs:
   build:
+    concurrency:
+      group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.variant }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: gpu
+            base_image: runpod/base:1.0.3-cuda1300-ubuntu2404
+            # latest + gpu + gpu-<sha> on default branch; branch name on other branches
+            meta_tags: |
+              type=raw,value=latest,enable={{is_default_branch}}
+              type=raw,value=gpu
+              type=ref,event=branch
+              type=sha,prefix=gpu-
+          - variant: cpu
+            base_image: runpod/base:1.0.3-ubuntu2404
+            meta_tags: |
+              type=raw,value=cpu
+              type=ref,event=branch
+              type=sha,prefix=cpu-
     steps:
       - uses: actions/checkout@v4
 
@@ -48,10 +65,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-            type=sha
+          tags: ${{ matrix.meta_tags }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -60,5 +74,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            BASE_IMAGE=${{ matrix.base_image }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

@@ -1,6 +1,11 @@
-# RunPod GPU base + bash (oh-my-bash, agnoster-multiline) and pixi global tools
+# RunPod base + bash (oh-my-bash, agnoster-multiline) and pixi global tools
 # per https://github.com/d-laub/dlaub-togo
-FROM runpod/base:1.0.3-cuda1300-ubuntu2404
+#
+# Build args:
+#   BASE_IMAGE — default GPU; use runpod/base:1.0.3-ubuntu2404 for CPU/Linux VM dev.
+
+ARG BASE_IMAGE=runpod/base:1.0.3-cuda1300-ubuntu2404
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
