@@ -30,7 +30,7 @@ jobs:
       matrix:
         include:
           - variant: gpu
-            base_image: runpod/base:1.0.3-cuda1300-ubuntu2404
+            base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
             # latest + gpu + gpu-<sha> on default branch; branch name on other branches
             meta_tags: |
               type=raw,value=latest,enable={{is_default_branch}}
