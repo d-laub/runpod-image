@@ -4,7 +4,7 @@
 # Build args:
 #   BASE_IMAGE — default GPU; use runpod/base:1.0.3-ubuntu2404 for CPU/Linux VM dev.
 
-ARG BASE_IMAGE=runpod/base:1.0.3-cuda1300-ubuntu2404
+ARG BASE_IMAGE=runpod/base:1.0.3-cuda1281-ubuntu2404
 FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
