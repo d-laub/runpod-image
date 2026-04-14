@@ -4,14 +4,14 @@ Two flavors from the same [`Dockerfile`](Dockerfile), differing only in the RunP
 
 | Variant | Base image | Typical use |
 |--------|------------|-------------|
-| **GPU** (default) | [`runpod/base:1.0.3-cuda1300-ubuntu2404`](https://hub.docker.com/r/runpod/base) | GPU pods |
+| **GPU** (default) | [`runpod/base:1.0.3-cuda1281-ubuntu2404`](https://hub.docker.com/r/runpod/base) | GPU pods |
 | **CPU** | [`runpod/base:1.0.3-ubuntu2404`](https://hub.docker.com/r/runpod/base) | CPU / Linux VM development |
 
 Both include the same interactive bash setup as [d-laub/dlaub-togo](https://github.com/d-laub/dlaub-togo):
 
 - [Oh My Bash](https://github.com/ohmybash/oh-my-bash) (`--unattended` for image builds)
 - Custom **agnoster-multiline** theme from dlaub-togo
-- [Pixi](https://pixi.sh) global tools: `ripgrep`, `bat`, `glow-md`, `sd`, `zoxide`, `rnr`, `fd-find`, `exa`, `prek`, `git`, `gh`
+- [Pixi](https://pixi.sh) global tools
 - Aliases from `aliases.sh` and `eval "$(zoxide init bash)"` in `~/.bashrc`
 
 `PATH` includes `/root/.pixi/bin` for non-login sessions.
