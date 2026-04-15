@@ -21,7 +21,8 @@ RUN chmod +x /tmp/setup-shell.sh \
     && bash /tmp/setup-shell.sh \
     && rm /tmp/setup-shell.sh
 
-RUN cat extend-bashrc.sh >> ~/.bashrc
+COPY extend-bashrc.sh /tmp/extend-bashrc.sh
+RUN cat /tmp/extend-bashrc.sh >> ~/.bashrc && rm /tmp/extend-bashrc.sh
 
 ENV PATH="/root/.pixi/bin:${PATH}"
 
