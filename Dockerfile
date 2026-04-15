@@ -21,6 +21,8 @@ RUN chmod +x /tmp/setup-shell.sh \
     && bash /tmp/setup-shell.sh \
     && rm /tmp/setup-shell.sh
 
+RUN cat extend-bashrc.sh >> ~/.bashrc
+
 ENV PATH="/root/.pixi/bin:${PATH}"
 
 WORKDIR /workspace
