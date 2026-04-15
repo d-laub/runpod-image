@@ -1,11 +1,16 @@
+# Load RunPod environment variables if not already set (normally appended at end of ~/.bashrc)
+if [[ -f /etc/rp_environment ]]; then
+    source /etc/rp_environment
+fi
+
 # Configure git to use GitHub CLI for HTTPS (private repos)
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+if [[ -n ${GITHUB_TOKEN:-} ]] && command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
     gh auth login --with-token "$GITHUB_TOKEN"
     gh auth setup-git
 fi
 
 # Configure rclone r2-scratch remote from env vars
-if [[ ! -f ~/.config/rclone/rclone.conf ]]; then
+if [[ -n ${R2_SCRATCH_ACCESS:-} ]] && [[ -n ${R2_SCRATCH_SECRET:-} ]] && [[ -n ${R2_ENDPOINT:-} ]] && [[ ! -f ~/.config/rclone/rclone.conf ]]; then
     rclone config create r2-scratch s3 \
         provider=Cloudflare \
         access_key_id="$R2_SCRATCH_ACCESS" \
@@ -15,7 +20,7 @@ if [[ ! -f ~/.config/rclone/rclone.conf ]]; then
 fi
 
 # Configure AWS CLI profile for r2-scratch
-if [[ ! -f ~/.aws/credentials ]]; then
+if [[ -n ${R2_SCRATCH_ACCESS:-} ]] && [[ -n ${R2_SCRATCH_SECRET:-} ]] && [[ ! -f ~/.aws/credentials ]]; then
     aws configure set aws_access_key_id "$R2_SCRATCH_ACCESS" --profile r2-scratch
     aws configure set aws_secret_access_key "$R2_SCRATCH_SECRET" --profile r2-scratch
     aws configure set region auto --profile r2-scratch
