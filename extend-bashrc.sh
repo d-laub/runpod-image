@@ -5,7 +5,7 @@ fi
 
 # Configure git to use GitHub CLI for HTTPS (private repos)
 if [[ -n ${GITHUB_TOKEN:-} ]] && command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
-    gh auth login --with-token "$GITHUB_TOKEN"
+    echo "$GITHUB_TOKEN" | gh auth login --with-token
     gh auth setup-git
 fi
 
