@@ -4,10 +4,7 @@ if [[ -f /etc/rp_environment ]]; then
 fi
 
 # Configure git to use GitHub CLI for HTTPS (private repos)
-if [[ -n ${GITHUB_TOKEN:-} ]] && command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
-    echo "$GITHUB_TOKEN" | gh auth login --with-token
-    gh auth setup-git
-fi
+gh auth setup-git
 
 # Configure rclone r2-scratch remote from env vars
 if [[ -n ${R2_SCRATCH_ACCESS:-} ]] && [[ -n ${R2_SCRATCH_SECRET:-} ]] && [[ -n ${R2_ENDPOINT:-} ]] && [[ ! -f ~/.config/rclone/rclone.conf ]]; then
