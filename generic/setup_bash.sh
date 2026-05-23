@@ -36,7 +36,11 @@ pixi g a -e dvc dvc-s3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 export PATH="${HOME}/.cargo/bin:${PATH}"
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-cargo binstall -y cargo-update
+# cargo-update is a "keep pixi globals fresh on demand" tool — non-fatal if
+# the binstall GH-API call rate-limits and the source-build fallback hits
+# missing system deps (openssl-sys). User can `cargo binstall cargo-update`
+# manually on a working pod later.
+cargo binstall -y cargo-update || echo "WARN: cargo-update install skipped (binstall fetch failed)"
 
 # Generic git defaults only — identity is set at runtime from RunPod secrets.
 git config --global pull.rebase true
