@@ -3,16 +3,8 @@ name: Docker image
 on:
   push:
     branches: [main, master]
-    paths:
-      - Dockerfile
-      - setup-shell.sh
-      - .github/workflows/docker-image.yml
   pull_request:
     branches: [main, master]
-    paths:
-      - Dockerfile
-      - setup-shell.sh
-      - .github/workflows/docker-image.yml
   workflow_dispatch:
 
 permissions:
@@ -22,27 +14,47 @@ permissions:
 jobs:
   build:
     concurrency:
-      group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.variant }}
+      group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.flavor }}-${{ matrix.variant }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - variant: gpu
+          # dlaub-togo flavor — generic shell + pixi base; owns the bare :latest/:gpu/:cpu tags
+          - flavor: dlaub-togo
+            variant: gpu
+            context: dlaub-togo
             base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
-            # latest + gpu + gpu-<sha> on default branch; branch name on other branches
             meta_tags: |
               type=raw,value=latest,enable={{is_default_branch}}
               type=raw,value=gpu
               type=ref,event=branch
               type=sha,prefix=gpu-
-          - variant: cpu
+          - flavor: dlaub-togo
+            variant: cpu
+            context: dlaub-togo
             base_image: runpod/base:1.0.3-ubuntu2404
             meta_tags: |
               type=raw,value=cpu
               type=ref,event=branch
               type=sha,prefix=cpu-
+
+          # gvf-germ-som flavor — project-specific bootstrap (clone repo, pixi install, dvc pull, rclone svar)
+          - flavor: gvf-germ-som
+            variant: gpu
+            context: gvf-germ-som
+            base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
+            meta_tags: |
+              type=raw,value=gvf-germ-som-gpu
+              type=sha,prefix=gvf-germ-som-gpu-
+          - flavor: gvf-germ-som
+            variant: cpu
+            context: gvf-germ-som
+            base_image: runpod/base:1.0.3-ubuntu2404
+            meta_tags: |
+              type=raw,value=gvf-germ-som-cpu
+              type=sha,prefix=gvf-germ-som-cpu-
     steps:
       - uses: actions/checkout@v4
 
@@ -70,11 +82,11 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ matrix.base_image }}
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          cache-from: type=gha,scope=${{ matrix.flavor }}-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.flavor }}-${{ matrix.variant }}

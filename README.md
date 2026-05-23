@@ -1,48 +1,64 @@
-# RunPod image: dlaub-togo shell + pixi
+# RunPod images (d-laub)
 
-Two flavors from the same [`Dockerfile`](Dockerfile), differing only in the RunPod base image:
+One repo, multiple **flavors** of RunPod docker images. Each flavor lives in its
+own subdirectory with its own `Dockerfile` + supporting scripts. CI matrix
+builds GPU and CPU variants of every flavor and pushes them to
+`ghcr.io/d-laub/runpod-image:*`.
 
-| Variant | Base image | Typical use |
-|--------|------------|-------------|
-| **GPU** (default) | [`runpod/base:1.0.3-cuda1281-ubuntu2404`](https://hub.docker.com/r/runpod/base) | GPU pods |
-| **CPU** | [`runpod/base:1.0.3-ubuntu2404`](https://hub.docker.com/r/runpod/base) | CPU / Linux VM development |
+## Flavors
 
-Both include the same interactive bash setup as [d-laub/dlaub-togo](https://github.com/d-laub/dlaub-togo):
+### `dlaub-togo/` — generic shell + pixi base
 
-- [Oh My Bash](https://github.com/ohmybash/oh-my-bash) (`--unattended` for image builds)
-- Custom **agnoster-multiline** theme from dlaub-togo
-- [Pixi](https://pixi.sh) global tools
-- Aliases from `aliases.sh` and `eval "$(zoxide init bash)"` in `~/.bashrc`
+[`dlaub-togo/Dockerfile`](dlaub-togo/Dockerfile). Interactive bash setup from
+[d-laub/dlaub-togo](https://github.com/d-laub/dlaub-togo): Oh My Bash with
+agnoster-multiline theme, pixi global tools, aliases, zoxide.
 
-`PATH` includes `/root/.pixi/bin` for non-login sessions.
+| Variant | Base image                                | Tag(s)                           |
+|---------|-------------------------------------------|----------------------------------|
+| GPU     | `runpod/base:1.0.3-cuda1281-ubuntu2404`   | `latest` (default branch), `gpu` |
+| CPU     | `runpod/base:1.0.3-ubuntu2404`            | `cpu`                            |
+
+### `gvf-germ-som/` — gvf-germ-som development pods
+
+[`gvf-germ-som/Dockerfile`](gvf-germ-som/Dockerfile). Project-specific bootstrap
+on top of the generic base: `usermod` via direct `/etc/passwd` edit, first-login
+seed of `/root` → `/workspace`, and an idempotent `bootstrap-gvf.sh` that clones
+[standardmodelbio/gvf-germ-som](https://github.com/standardmodelbio/gvf-germ-som),
+runs `pixi install`, `dvc pull`, and rclones `mmrf.svar`. See
+[`gvf-germ-som/README.md`](gvf-germ-som/README.md) for required RunPod template
+secrets.
+
+| Variant | Base image                                | Tag(s)                           |
+|---------|-------------------------------------------|----------------------------------|
+| GPU     | `runpod/base:1.0.3-cuda1281-ubuntu2404`   | `gvf-germ-som-gpu`               |
+| CPU     | `runpod/base:1.0.3-ubuntu2404`            | `gvf-germ-som-cpu`               |
+
+Per-flavor commit SHAs are also tagged (`gpu-<sha>`, `cpu-<sha>`,
+`gvf-germ-som-gpu-<sha>`, `gvf-germ-som-cpu-<sha>`) for reproducible pin-back.
 
 ## Build locally
 
-**GPU** (default):
+Each flavor has its own build context — the subdirectory is the docker context:
 
 ```bash
-docker build -t your-registry/runpod-dlaub-togo:latest .
-```
+# dlaub-togo GPU
+docker build dlaub-togo/ -t ghcr.io/d-laub/runpod-image:gpu
 
-**CPU** (same layers, different base):
-
-```bash
+# gvf-germ-som CPU
 docker build \
   --build-arg BASE_IMAGE=runpod/base:1.0.3-ubuntu2404 \
-  -t your-registry/runpod-dlaub-togo:cpu .
+  -t ghcr.io/d-laub/runpod-image:gvf-germ-som-cpu \
+  gvf-germ-som/
 ```
 
-## CI (GitHub Actions)
+## CI
 
-On push to **`main`** or **`master`**, [`.github/workflows/docker-image.yml`](.github/workflows/docker-image.yml) builds **both** variants and pushes to **GHCR**:
-
-- **GPU:** `latest` and `gpu` on the default branch, plus branch name and `gpu-<sha>`
-- **CPU:** `cpu`, plus branch name and `cpu-<sha>`
-
-Pull requests run both builds without pushing.
-
-The workflow uses the default `GITHUB_TOKEN` with `packages: write`. The first time, open the package under **GitHub → Packages → container → Package settings** and set **Change visibility** to **Public** if you want anonymous pulls.
+Pushes to `main` / `master` trigger
+[`.github/workflows/docker-image.yml`](.github/workflows/docker-image.yml).
+Matrix: 4 jobs (2 flavors × 2 variants). PRs build but don't push. GHA cache is
+scoped per `(flavor, variant)`.
 
 ## Use on RunPod
 
-Push the image, then create a template/pod that references it. Mount volumes at `/workspace` if you use the default workdir.
+Pick a tag and reference it in a RunPod template. Mount the volume at
+`/workspace` (the gvf-germ-som flavor depends on this).
