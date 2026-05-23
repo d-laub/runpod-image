@@ -1,48 +1,47 @@
 # RunPod images (d-laub)
 
-One repo, multiple **flavors** of RunPod docker images. Each flavor lives in its
-own subdirectory with its own `Dockerfile` + supporting scripts. CI matrix
+One repo, multiple **flavors** of RunPod docker images. Each flavor lives in
+its own subdirectory with its own `Dockerfile` + supporting scripts. CI matrix
 builds GPU and CPU variants of every flavor and pushes them to
 `ghcr.io/d-laub/runpod-image:*`.
 
 ## Flavors
 
-### `dlaub-togo/` — generic shell + pixi base
+### [`generic/`](generic) — project-agnostic dev pod
 
-[`dlaub-togo/Dockerfile`](dlaub-togo/Dockerfile). Interactive bash setup from
-[d-laub/dlaub-togo](https://github.com/d-laub/dlaub-togo): Oh My Bash with
-agnoster-multiline theme, pixi global tools, aliases, zoxide.
+Default image. `:latest` (default-branch alias) / `:gpu` / `:cpu`.
 
-| Variant | Base image                                | Tag(s)                           |
-|---------|-------------------------------------------|----------------------------------|
-| GPU     | `runpod/base:1.0.3-cuda1281-ubuntu2404`   | `latest` (default branch), `gpu` |
-| CPU     | `runpod/base:1.0.3-ubuntu2404`            | `cpu`                            |
+dlaub-togo shell + pixi globals + Claude tooling + `HOME=/workspace` + RunPod
+secret wiring (rclone / aws / wandb / git identity). Does **not** clone any
+repo or fetch any data — bring your own. See
+[`generic/README.md`](generic/README.md) for template secrets.
 
-### `gvf-germ-som/` — gvf-germ-som development pods
+### [`gvf-germ-som/`](gvf-germ-som) — gvf-germ-som development pods
 
-[`gvf-germ-som/Dockerfile`](gvf-germ-som/Dockerfile). Project-specific bootstrap
-on top of the generic base: `usermod` via direct `/etc/passwd` edit, first-login
-seed of `/root` → `/workspace`, and an idempotent `bootstrap-gvf.sh` that clones
+`:gvf-germ-som-gpu` / `:gvf-germ-som-cpu`.
+
+Same generic base, plus an idempotent first-shell bootstrap that clones
 [standardmodelbio/gvf-germ-som](https://github.com/standardmodelbio/gvf-germ-som),
-runs `pixi install`, `dvc pull`, and rclones `mmrf.svar`. See
-[`gvf-germ-som/README.md`](gvf-germ-som/README.md) for required RunPod template
-secrets.
+runs `pixi install` for the matching CUDA env, `dvc pull` for hg38 + .gvl
+data, and rclones the cross-project `mmrf.svar` as a sibling of the `.gvl`
+directories. See [`gvf-germ-som/README.md`](gvf-germ-som/README.md).
 
-| Variant | Base image                                | Tag(s)                           |
-|---------|-------------------------------------------|----------------------------------|
-| GPU     | `runpod/base:1.0.3-cuda1281-ubuntu2404`   | `gvf-germ-som-gpu`               |
-| CPU     | `runpod/base:1.0.3-ubuntu2404`            | `gvf-germ-som-cpu`               |
+## Tag matrix
 
-Per-flavor commit SHAs are also tagged (`gpu-<sha>`, `cpu-<sha>`,
-`gvf-germ-som-gpu-<sha>`, `gvf-germ-som-cpu-<sha>`) for reproducible pin-back.
+| Flavor          | Variant | Tags                                             |
+|-----------------|---------|--------------------------------------------------|
+| generic         | GPU     | `latest` (default branch), `gpu`, `gpu-<sha>`    |
+| generic         | CPU     | `cpu`, `cpu-<sha>`                               |
+| gvf-germ-som    | GPU     | `gvf-germ-som-gpu`, `gvf-germ-som-gpu-<sha>`     |
+| gvf-germ-som    | CPU     | `gvf-germ-som-cpu`, `gvf-germ-som-cpu-<sha>`     |
 
 ## Build locally
 
-Each flavor has its own build context — the subdirectory is the docker context:
+Each flavor has its own build context — the subdirectory IS the docker context:
 
 ```bash
-# dlaub-togo GPU
-docker build dlaub-togo/ -t ghcr.io/d-laub/runpod-image:gpu
+# generic GPU
+docker build generic/ -t ghcr.io/d-laub/runpod-image:gpu
 
 # gvf-germ-som CPU
 docker build \
@@ -58,7 +57,12 @@ Pushes to `main` / `master` trigger
 Matrix: 4 jobs (2 flavors × 2 variants). PRs build but don't push. GHA cache is
 scoped per `(flavor, variant)`.
 
-## Use on RunPod
+## Adding a new flavor
 
-Pick a tag and reference it in a RunPod template. Mount the volume at
-`/workspace` (the gvf-germ-som flavor depends on this).
+1. Create `<flavor>/` with its `Dockerfile` and any supporting scripts. Either
+   write a self-contained Dockerfile, or `FROM ghcr.io/d-laub/runpod-image:gpu`
+   to inherit the generic base.
+2. Add two matrix entries (gpu + cpu) to `.github/workflows/docker-image.yml`
+   following the pattern of `gvf-germ-som`.
+3. Pick tag names that don't collide with `:gpu` / `:cpu` (those belong to
+   `generic`). Prefix with the flavor name, e.g. `:my-project-gpu`.

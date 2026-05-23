@@ -21,19 +21,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # dlaub-togo flavor — generic shell + pixi base; owns the bare :latest/:gpu/:cpu tags
-          - flavor: dlaub-togo
+          # generic flavor — generic shell + pixi base; owns the bare :latest/:gpu/:cpu tags
+          - flavor: generic
             variant: gpu
-            context: dlaub-togo
+            context: generic
             base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
             meta_tags: |
               type=raw,value=latest,enable={{is_default_branch}}
               type=raw,value=gpu
               type=ref,event=branch
               type=sha,prefix=gpu-
-          - flavor: dlaub-togo
+          - flavor: generic
             variant: cpu
-            context: dlaub-togo
+            context: generic
             base_image: runpod/base:1.0.3-ubuntu2404
             meta_tags: |
               type=raw,value=cpu
