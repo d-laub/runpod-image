@@ -80,7 +80,7 @@ cp -r "${dlaub_togo_dir}/agnoster-multiline" "${HOME}/.oh-my-bash/themes/"
 sd '^OSH_THEME=.*$' 'OSH_THEME="agnoster-multiline"' "${HOME}/.bashrc"
 
 # bashrc tail
-printf '%s\n' 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+printf '%s\n' 'export PATH="${HOME}/.local/bin:${HOME}/.pixi/bin:${HOME}/.cargo/bin:${PATH}"' >> "${HOME}/.bashrc"
 printf '%s\n' 'eval "$(zoxide init bash)"' >> "${HOME}/.bashrc"
 printf '%s\n' 'eval "$(dvc completion -s bash)"' >> "${HOME}/.bashrc"
 
