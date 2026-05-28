@@ -24,7 +24,7 @@ Docker images for RunPod pods that boot directly into a working
 
 | Secret              | Required | Purpose                                        |
 |---------------------|----------|------------------------------------------------|
-| `GH_TOKEN`          | yes      | Clone private `standardmodelbio/gvf-germ-som`  |
+| `GITHUB_TOKEN`          | yes      | Clone private `standardmodelbio/gvf-germ-som`  |
 | `R2_SCRATCH_ACCESS` | yes      | R2 access key (rclone / aws / dvc)             |
 | `R2_SCRATCH_SECRET` | yes      | R2 secret key                                  |
 | `R2_ENDPOINT`       | yes      | R2 endpoint URL                                |

@@ -17,7 +17,7 @@ All optional — the image runs fine without any of them, just with the correspo
 
 | Secret              | Purpose                                                    |
 |---------------------|------------------------------------------------------------|
-| `GH_TOKEN`          | `gh auth setup-git` for private repo access over HTTPS     |
+| `GITHUB_TOKEN`          | `gh auth setup-git` for private repo access over HTTPS     |
 | `R2_SCRATCH_ACCESS` | R2 access key — used by rclone / aws CLI / dvc-s3          |
 | `R2_SCRATCH_SECRET` | R2 secret key                                              |
 | `R2_ENDPOINT`       | R2 endpoint URL (e.g. `https://<account>.r2.cloudflarestorage.com`) |

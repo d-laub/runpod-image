@@ -6,8 +6,8 @@ if [[ -f /etc/rp_environment ]]; then
     source /etc/rp_environment
 fi
 
-# Configure git over HTTPS using gh-resolved GH_TOKEN
-if command -v gh >/dev/null 2>&1 && [[ -n ${GH_TOKEN:-} ]]; then
+# Configure git over HTTPS using gh-resolved GITHUB_TOKEN
+if command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
     gh auth setup-git 2>/dev/null || true
 fi
 
@@ -15,7 +15,7 @@ fi
 _set_git_identity() {
     local name="${GIT_USER_NAME:-}"
     local email="${GIT_USER_EMAIL:-}"
-    if [[ -z $name || -z $email ]] && command -v gh >/dev/null 2>&1 && [[ -n ${GH_TOKEN:-} ]]; then
+    if [[ -z $name || -z $email ]] && command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
         name="${name:-$(gh api user --jq .name 2>/dev/null || true)}"
         email="${email:-$(gh api user --jq .email 2>/dev/null || true)}"
     fi
@@ -53,7 +53,12 @@ fi
 # First-shell project bootstrap (heavy: clones repo, pixi install, dvc pull)
 if [[ ! -f /workspace/.gvf-bootstrapped && -z "${GVF_SKIP_BOOTSTRAP:-}" ]]; then
     if [[ -x /usr/local/bin/bootstrap-gvf.sh ]]; then
-        /usr/local/bin/bootstrap-gvf.sh 2>&1 | tee -a /workspace/.gvf-bootstrap.log \
-            && touch /workspace/.gvf-bootstrapped
+        # PIPESTATUS preserves bootstrap exit code through `tee`; without it,
+        # tee's success would mask a bootstrap failure and the sentinel would
+        # be touched even when the bootstrap broke.
+        /usr/local/bin/bootstrap-gvf.sh 2>&1 | tee -a /workspace/.gvf-bootstrap.log
+        if (( ${PIPESTATUS[0]} == 0 )); then
+            touch /workspace/.gvf-bootstrapped
+        fi
     fi
 fi

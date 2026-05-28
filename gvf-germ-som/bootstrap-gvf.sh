@@ -25,6 +25,8 @@ else
     gh repo clone "${GITHUB_REPO}" "${VM_REPO_DIR}"
 fi
 cd "${VM_REPO_DIR}"
+log "Initializing submodules"
+git submodule update --init --recursive
 
 # 2) Detect CUDA → pick PIXI_ENV
 detect_pixi_env() {

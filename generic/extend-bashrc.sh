@@ -6,8 +6,8 @@ if [[ -f /etc/rp_environment ]]; then
     source /etc/rp_environment
 fi
 
-# Configure git over HTTPS using gh-resolved GH_TOKEN
-if command -v gh >/dev/null 2>&1 && [[ -n ${GH_TOKEN:-} ]]; then
+# Configure git over HTTPS using gh-resolved GITHUB_TOKEN
+if command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
     gh auth setup-git 2>/dev/null || true
 fi
 
@@ -15,7 +15,7 @@ fi
 _set_git_identity() {
     local name="${GIT_USER_NAME:-}"
     local email="${GIT_USER_EMAIL:-}"
-    if [[ -z $name || -z $email ]] && command -v gh >/dev/null 2>&1 && [[ -n ${GH_TOKEN:-} ]]; then
+    if [[ -z $name || -z $email ]] && command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
         name="${name:-$(gh api user --jq .name 2>/dev/null || true)}"
         email="${email:-$(gh api user --jq .email 2>/dev/null || true)}"
     fi
