@@ -37,6 +37,12 @@ COPY seed-home.sh /etc/profile.d/00-seed-home.sh
 # docker build.
 RUN sed -i 's|^\(root:[^:]*:0:0:[^:]*:\)/root:|\1/workspace:|' /etc/passwd
 ENV HOME=/workspace
+
+# RunPod's pod startup writes the team SSH pubkey to /root/.ssh/authorized_keys,
+# but with HOME=/workspace sshd would otherwise look at /workspace/.ssh/. Pin
+# the path so TCP SSH auth works regardless of HOME.
+RUN sed -i '/^#\?AuthorizedKeysFile/d' /etc/ssh/sshd_config \
+    && echo 'AuthorizedKeysFile /root/.ssh/authorized_keys' >> /etc/ssh/sshd_config
 ENV PATH=/workspace/.pixi/bin:/root/.pixi/bin:/root/.cargo/bin:${PATH}
 
 WORKDIR /workspace

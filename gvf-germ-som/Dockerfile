@@ -39,4 +39,10 @@ RUN sed -i 's|^\(root:[^:]*:0:0:[^:]*:\)/root:|\1/workspace:|' /etc/passwd
 ENV HOME=/workspace
 ENV PATH=/workspace/.pixi/bin:/root/.pixi/bin:/root/.cargo/bin:${PATH}
 
+# RunPod's pod startup writes the team SSH pubkey to /root/.ssh/authorized_keys,
+# but with HOME=/workspace sshd would otherwise look at /workspace/.ssh/. Pin
+# the path so TCP SSH auth works regardless of HOME.
+RUN sed -i '/^#\?AuthorizedKeysFile/d' /etc/ssh/sshd_config \
+    && echo 'AuthorizedKeysFile /root/.ssh/authorized_keys' >> /etc/ssh/sshd_config
+
 WORKDIR /workspace
