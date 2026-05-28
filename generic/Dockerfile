@@ -19,8 +19,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Build-time: install dlaub-togo shell + pixi globals + Claude tooling into /root
-# as the "seed template" for /workspace. Uses this repo's local setup_bash.sh
-# (which already has the rustup -y fix), not the upstream dlaub-togo one.
+# as the "seed template" for /workspace. setup_bash.sh is a thin wrapper that
+# clones upstream dlaub-togo and runs its setup_bash.sh after a minimal overlay.
 COPY setup_bash.sh /tmp/setup_bash.sh
 RUN bash /tmp/setup_bash.sh \
     && rm /tmp/setup_bash.sh
