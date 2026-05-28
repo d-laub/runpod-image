@@ -11,7 +11,7 @@ set -euo pipefail
 
 R2_REMOTE="${R2_REMOTE:-r2-scratch:smb-data-prod-scratch}"
 VM_REPO_DIR="${VM_REPO_DIR:-/workspace/gvf-germ-som}"
-GITHUB_REPO='standardmodelbio/gvf-germ-som'
+GITHUB_REPO='d-laub/gvf-germ-som'
 
 log() { printf '[bootstrap-gvf] %s\n' "$*" >&2; }
 
