@@ -39,11 +39,22 @@ RUN sed -i 's|^\(root:[^:]*:0:0:[^:]*:\)/root:|\1/workspace:|' /etc/passwd
 ENV HOME=/workspace
 ENV PATH=/workspace/.pixi/bin:/root/.pixi/bin:/root/.cargo/bin:${PATH}
 
-# RunPod's pod startup writes the team SSH pubkey to $HOME/.ssh/authorized_keys
-# (HOME-aware via /etc/passwd) — that resolves to /workspace/.ssh/authorized_keys.
-# Pin sshd's AuthorizedKeysFile to that absolute path so TCP SSH works
-# regardless of how login shells later reinterpret HOME.
-RUN sed -i '/^#\?AuthorizedKeysFile/d' /etc/ssh/sshd_config \
-    && echo 'AuthorizedKeysFile /workspace/.ssh/authorized_keys' >> /etc/ssh/sshd_config
+# SSH pubkey auth, decoupled from HOME=/workspace. RunPod's setup_ssh writes
+# keys to $HOME/.ssh = /workspace/.ssh, but /workspace is a network volume that
+# is permanently mode 777 and ignores chmod; with StrictModes yes, sshd refuses
+# any authorized_keys under a world-writable path and silently falls back to a
+# password prompt. So we pin AuthorizedKeysFile to a root-owned path on the
+# container filesystem (perms honored, StrictModes satisfied) and let
+# post-start.sh populate it from $PUBLIC_KEY. See post-start.sh for the full
+# rationale (also handles RunPod concatenating multiple keys onto one line).
+RUN mkdir -p /etc/ssh/keys \
+    && chmod 0755 /etc/ssh/keys \
+    && sed -i '/^#\?AuthorizedKeysFile/d;/^#\?StrictModes/d' /etc/ssh/sshd_config \
+    && printf 'AuthorizedKeysFile /etc/ssh/keys/authorized_keys\nStrictModes yes\n' >> /etc/ssh/sshd_config
+
+# Runs (as /post_start.sh) after RunPod's setup_ssh; rewrites the pinned
+# authorized_keys with one valid key per line. sshd re-reads it per connection.
+COPY post-start.sh /post_start.sh
+RUN chmod 0755 /post_start.sh
 
 WORKDIR /workspace
