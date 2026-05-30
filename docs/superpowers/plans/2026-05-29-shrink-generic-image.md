@@ -56,18 +56,21 @@ bash setup_bash.sh
 Append immediately after that line:
 ```bash
 
-# --- Image-size cleanup (runs in the same Docker layer as the install) ---
-# The installs above leave ~2GB of download caches and rust offline docs that
-# are not needed to RUN the tools. Remove them so they never enter the image.
-# Each removal is guarded so this script's `set -euo pipefail` cannot abort on
-# an already-absent path.
+# --- Image-size cleanup (runs in the same Docker layer as the install above) ---
+# Drops ~1.3 GB of non-runtime bulk so it never ships in the image. Verified
+# against the published CPU image: /root 4.1G -> 2.8G, all tools still launch.
+# Each removal is guarded so this script's `set -euo pipefail` can't abort on an
+# already-absent path.
 
-# Rust: keep clippy/rustfmt, drop the large offline doc set (re-add at runtime
-# with `rustup component add rust-docs`).
-export PATH="${HOME}/.cargo/bin:${PATH}"
-rustup component remove rust-docs 2>/dev/null || true
+# Rust offline HTML docs (~800 MB). Removed by direct rm, NOT
+# `rustup component remove rust-docs`: rustup's rename-into-tmp removal fails
+# with "Invalid cross-device link" on overlay filesystems. rustc/cargo/clippy/
+# rustfmt are untouched; re-fetch docs at runtime with `rustup component add`.
+rm -rf "${HOME}"/.rustup/toolchains/*/share/doc 2>/dev/null || true
 
-# Package-download caches (regenerated on demand by pixi/uv/pip/cargo/npm).
+# Package-download caches. The pixi tool envs are self-contained once built
+# (rattler hardlinks shared files into ~/.pixi, which we keep), so dropping the
+# caches mostly reclaims cache-unique bytes; runtime installs re-fetch on demand.
 rm -rf \
     "${HOME}/.cache/rattler" \
     "${HOME}/.cache/uv" \
@@ -90,59 +93,39 @@ Expected: no output, exit 0.
 
 ---
 
-### Task 3: Build the optimized image and verify the size dropped
+### Task 3: Verify freed bytes + tool safety via in-container simulation
 
-**Files:** none (build + measurement)
+This machine is arm64; the images are `linux/amd64`, so a local build runs
+under slow/flaky qemu. Instead, run the exact cleanup commands inside the
+already-pulled baseline container and measure the real (hardlink-aware) delta.
 
-- [ ] **Step 1: Build the optimized generic CPU image locally**
+**Files:** none (measurement)
 
-Run:
-```bash
-docker build generic/ \
-  --build-arg BASE_IMAGE=runpod/base:1.0.3-ubuntu2404 \
-  -t runpod-generic:cpu-optimized
-```
-Expected: build succeeds (several minutes; runs the full networked install). If it fails, read the failing `RUN` output — most likely a typo in the appended cleanup.
-
-- [ ] **Step 2: Record the optimized size and compare to baseline**
+- [ ] **Step 1: Simulate cleanup, measure `du -s /root` delta, smoke tools**
 
 Run:
 ```bash
-docker image inspect runpod-generic:cpu-optimized -f '{{.Size}}' | tee /tmp/size_optimized.txt
-python3 - <<'PY'
-base = int(open('/tmp/size_baseline.txt').read().strip())
-opt  = int(open('/tmp/size_optimized.txt').read().strip())
-saved = base - opt
-print(f"baseline={base/1e9:.2f} GB  optimized={opt/1e9:.2f} GB  saved={saved/1e9:.2f} GB")
-assert saved > 1_500_000_000, f"expected >1.5 GB saved, got {saved/1e9:.2f} GB"
-print("PASS: size dropped as expected")
-PY
-```
-Expected: `PASS: size dropped as expected` (expect ~2 GB saved, dominated by the rattler cache).
-
----
-
-### Task 4: Smoke-test the optimized image (catch over-deletion)
-
-**Files:** none
-
-- [ ] **Step 1: Confirm the core tools still launch**
-
-Run:
-```bash
-docker run --rm runpod-generic:cpu-optimized bash -lc '
-  export PATH=$HOME/.local/bin:$HOME/.pixi/bin:$HOME/.cargo/bin:$PATH
-  set -e
-  pixi --version
-  cargo --version
-  rg --version | head -1
-  dvc --version
-  gh --version | head -1
-  claude --version
-  echo SMOKE_OK
+docker run --rm --platform linux/amd64 ghcr.io/d-laub/runpod-image:cpu bash -lc '
+set -e
+export PATH=$HOME/.local/bin:$HOME/.pixi/bin:$HOME/.cargo/bin:$PATH
+echo "== BEFORE =="; du -sh /root
+rm -rf "$HOME"/.rustup/toolchains/*/share/doc 2>/dev/null || true
+rm -rf \
+  "$HOME/.cache/rattler" "$HOME/.cache/uv" "$HOME/.cache/pip" \
+  "$HOME/.npm" "$HOME/.cache/npm" \
+  "$HOME/.cargo/registry" "$HOME/.cargo/git" \
+  "$HOME/.rustup/downloads" "$HOME/.rustup/tmp" 2>/dev/null || true
+find "$HOME/.pixi" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+rm -rf "$HOME/.cache"/* 2>/dev/null || true
+echo "== AFTER =="; du -sh /root
+echo "== SMOKE =="
+pixi --version && cargo --version && rustc --version && rg --version | head -1 \
+  && dvc --version && gh --version | head -1 && claude --version && echo SMOKE_OK
 '
 ```
-Expected: each version line prints and the final line is `SMOKE_OK`. If a tool is "command not found", a cleanup removed too much — narrow the offending `rm` in `generic/setup_bash.sh` and rebuild (Task 3 Step 1).
+Expected: BEFORE ≈ 4.1G, AFTER ≈ 2.8G (≈1.3 GB freed; `du -s` is hardlink-aware
+so this is real unique bytes), and final line `SMOKE_OK`. A "command not found"
+means a cleanup removed too much — narrow the offending `rm`.
 
 ---
 

@@ -29,3 +29,32 @@ p.write_text(new)
 PY
 
 bash setup_bash.sh
+
+# --- Image-size cleanup (runs in the same Docker layer as the install above) ---
+# Drops ~1.3 GB of non-runtime bulk so it never ships in the image. Verified
+# against the published CPU image: /root 4.1G -> 2.8G, all tools still launch.
+# Each removal is guarded so this script's `set -euo pipefail` can't abort on an
+# already-absent path.
+
+# Rust offline HTML docs (~800 MB). Removed by direct rm, NOT
+# `rustup component remove rust-docs`: rustup's rename-into-tmp removal fails
+# with "Invalid cross-device link" on overlay filesystems. rustc/cargo/clippy/
+# rustfmt are untouched; re-fetch docs at runtime with `rustup component add`.
+rm -rf "${HOME}"/.rustup/toolchains/*/share/doc 2>/dev/null || true
+
+# Package-download caches. The pixi tool envs are self-contained once built
+# (rattler hardlinks shared files into ~/.pixi, which we keep), so dropping the
+# caches mostly reclaims cache-unique bytes; runtime installs re-fetch on demand.
+rm -rf \
+    "${HOME}/.cache/rattler" \
+    "${HOME}/.cache/uv" \
+    "${HOME}/.cache/pip" \
+    "${HOME}/.npm" "${HOME}/.cache/npm" \
+    "${HOME}/.cargo/registry" "${HOME}/.cargo/git" \
+    "${HOME}/.rustup/downloads" "${HOME}/.rustup/tmp" 2>/dev/null || true
+
+# Compiled Python bytecode in the pixi tool envs.
+find "${HOME}/.pixi" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+
+# Catch-all: ~/.cache holds only regenerable caches (Claude config is ~/.claude).
+rm -rf "${HOME}/.cache"/* 2>/dev/null || true
