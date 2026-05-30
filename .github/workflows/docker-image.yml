@@ -12,49 +12,30 @@ permissions:
   packages: write
 
 jobs:
-  build:
+  # Stage 1 — the generic base image. Owns the bare :latest/:gpu/:cpu tags and
+  # an immutable per-commit :{gpu,cpu}-<sha> tag that downstream flavors pin to.
+  generic:
     concurrency:
-      group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.flavor }}-${{ matrix.variant }}
+      group: docker-image-${{ github.workflow }}-${{ github.ref }}-generic-${{ matrix.variant }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # generic flavor — generic shell + pixi base; owns the bare :latest/:gpu/:cpu tags
-          - flavor: generic
-            variant: gpu
-            context: generic
+          - variant: gpu
             base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
             meta_tags: |
               type=raw,value=latest,enable={{is_default_branch}}
               type=raw,value=gpu
               type=ref,event=branch
               type=sha,prefix=gpu-
-          - flavor: generic
-            variant: cpu
-            context: generic
+          - variant: cpu
             base_image: runpod/base:1.0.3-ubuntu2404
             meta_tags: |
               type=raw,value=cpu
               type=ref,event=branch
               type=sha,prefix=cpu-
-
-          # gvf-germ-som flavor — project-specific bootstrap (clone repo, pixi install, dvc pull, rclone svar)
-          - flavor: gvf-germ-som
-            variant: gpu
-            context: gvf-germ-som
-            base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
-            meta_tags: |
-              type=raw,value=gvf-germ-som-gpu
-              type=sha,prefix=gvf-germ-som-gpu-
-          - flavor: gvf-germ-som
-            variant: cpu
-            context: gvf-germ-som
-            base_image: runpod/base:1.0.3-ubuntu2404
-            meta_tags: |
-              type=raw,value=gvf-germ-som-cpu
-              type=sha,prefix=gvf-germ-som-cpu-
     steps:
       - uses: actions/checkout@v4
 
@@ -64,8 +45,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Login (read+write) even on PRs: downstream flavors need to pull this
+      # base image, and pushing is separately gated below.
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -82,11 +64,83 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
+          context: generic
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ matrix.base_image }}
+          cache-from: type=gha,scope=generic-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=generic-${{ matrix.variant }}
+
+  # Stage 2 — project flavors layered ON TOP of the generic image (FROM it).
+  # Each waits for `generic`, then builds against the matching generic variant.
+  flavors:
+    needs: generic
+    concurrency:
+      group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.flavor }}-${{ matrix.variant }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: gvf-germ-som
+            variant: gpu
+            context: gvf-germ-som
+            from_tag: gpu
+            meta_tags: |
+              type=raw,value=gvf-germ-som-gpu
+              type=sha,prefix=gvf-germ-som-gpu-
+          - flavor: gvf-germ-som
+            variant: cpu
+            context: gvf-germ-som
+            from_tag: cpu
+            meta_tags: |
+              type=raw,value=gvf-germ-som-cpu
+              type=sha,prefix=gvf-germ-som-cpu-
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name (Docker requires lowercase)
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve generic base image
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PRs don't push generic — build on the last main generic image.
+            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.from_tag }}" >> "$GITHUB_ENV"
+          else
+            # Immutable per-commit tag the `generic` job just pushed (7-char
+            # short sha matches docker/metadata-action's type=sha default).
+            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.from_tag }}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.IMAGE_NAME }}
+          tags: ${{ matrix.meta_tags }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ env.BASE_IMAGE }}
           cache-from: type=gha,scope=${{ matrix.flavor }}-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.flavor }}-${{ matrix.variant }}

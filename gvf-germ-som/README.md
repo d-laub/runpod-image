@@ -10,9 +10,10 @@ Docker images for RunPod pods that boot directly into a working
 
 ## What's inside
 
-- **Shell:** oh-my-bash with agnoster-multiline theme, pixi global tools
-  (rg, bat, fd, zoxide, dvc, rclone, awscli, uv, wandb, …), Rust toolchain,
-  Claude Code + RTK + tilth + superpowers plugin, marimo skills.
+- **Built `FROM` the generic image** — inherits the dlaub-togo shell, pixi
+  global tools, Rust toolchain, Claude tooling, RunPod secret wiring, and the
+  ephemeral-`/root` setup. This image adds only the project bootstrap below.
+  See [`../generic/README.md`](../generic/README.md) for the base.
 - **HOME = `/root` (ephemeral).** Code and shell state are not persisted; the
   repo is re-cloned from GitHub on each boot. Only large **data** persists, on
   the RunPod network volume at `/workspace/gvf-germ-som` (the DVC cache + the
@@ -41,17 +42,23 @@ Optional tunables: `R2_REMOTE` (default `r2-scratch:smb-data-prod-scratch`),
 
 ## Build locally
 
-```bash
-# GPU
-docker build -t ghcr.io/standardmodelbio/gvf-germ-som-runpod-image:gpu .
+This image is `FROM` the generic one, so the base must exist first — either
+pull the published generic image (the default `BASE_IMAGE`) or build it locally
+and pass its tag.
 
-# CPU
+```bash
+# GPU (pulls ghcr.io/d-laub/runpod-image:gpu as the base)
+docker build gvf-germ-som/ -t ghcr.io/d-laub/runpod-image:gvf-germ-som-gpu
+
+# CPU (base onto the generic CPU image)
 docker build \
-  --build-arg BASE_IMAGE=runpod/base:1.0.3-ubuntu2404 \
-  -t ghcr.io/standardmodelbio/gvf-germ-som-runpod-image:cpu .
+  --build-arg BASE_IMAGE=ghcr.io/d-laub/runpod-image:cpu \
+  -t ghcr.io/d-laub/runpod-image:gvf-germ-som-cpu \
+  gvf-germ-som/
 ```
 
 ## CI
 
-Push to `main` builds both variants and pushes to GHCR (see
-`.github/workflows/docker-image.yml`).
+Push to `main` runs `.github/workflows/docker-image.yml`: the `generic` job
+builds the base, then the `flavors` job (`needs: generic`) builds this image
+`FROM` the matching per-commit generic tag and pushes both to GHCR.
