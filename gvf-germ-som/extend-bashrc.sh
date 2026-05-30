@@ -1,5 +1,5 @@
-# Appended to /root/.bashrc at build time; seeded to /workspace/.bashrc on
-# first login by /etc/profile.d/00-seed-home.sh. Runs on every shell.
+# Appended to /root/.bashrc at build time. Runs on every interactive shell.
+# /root is ephemeral, so the secret/git wiring below re-applies on each boot.
 
 # Load RunPod-injected env vars (rp_environment exports the template secrets)
 if [[ -f /etc/rp_environment ]]; then
@@ -50,15 +50,19 @@ if [[ -n ${WANDB_API_KEY:-} && ! -f ${HOME}/.netrc ]] && command -v wandb >/dev/
     wandb login --relogin "$WANDB_API_KEY" >/dev/null 2>&1 || true
 fi
 
-# First-shell project bootstrap (heavy: clones repo, pixi install, dvc pull)
-if [[ ! -f /workspace/.gvf-bootstrapped && -z "${GVF_SKIP_BOOTSTRAP:-}" ]]; then
+# First-shell project bootstrap (heavy: clones repo, pixi install, dvc pull).
+# Sentinel lives on /root (ephemeral): code is re-cloned on every fresh
+# container, so the bootstrap must re-run each boot. It's idempotent and cheap
+# on resume — git pull, dvc checkout from the persisted /workspace cache, and
+# rclone skips data already on the volume.
+if [[ ! -f /root/.gvf-bootstrapped && -z "${GVF_SKIP_BOOTSTRAP:-}" ]]; then
     if [[ -x /usr/local/bin/bootstrap-gvf.sh ]]; then
         # PIPESTATUS preserves bootstrap exit code through `tee`; without it,
         # tee's success would mask a bootstrap failure and the sentinel would
         # be touched even when the bootstrap broke.
-        /usr/local/bin/bootstrap-gvf.sh 2>&1 | tee -a /workspace/.gvf-bootstrap.log
+        /usr/local/bin/bootstrap-gvf.sh 2>&1 | tee -a /root/.gvf-bootstrap.log
         if (( ${PIPESTATUS[0]} == 0 )); then
-            touch /workspace/.gvf-bootstrapped
+            touch /root/.gvf-bootstrapped
         fi
     fi
 fi

@@ -6,8 +6,9 @@ The base `d-laub/runpod-image:latest` / `:gpu` / `:cpu`. Includes:
 - pixi global tools (rg, bat, fd, zoxide, dvc, dvc-s3, rclone, awscli, uv, wandb, …)
 - Rust toolchain (`cargo`, `cargo-binstall`, `cargo-update`)
 - Claude Code + RTK + superpowers plugin + tilth + marimo + RunPod / SeqPro / genoray / GenVarLoader skills
-- `HOME=/workspace` (persistent across pod pause/resume) with first-login seed from `/root` template via `/etc/profile.d/00-seed-home.sh`
-- Runtime config of rclone / aws (both `r2-scratch` and default profiles) / wandb / git identity from RunPod template secrets
+- `HOME=/root` on the container filesystem — **ephemeral**, wiped on pod stop/redeploy. No network-volume persistence: code is git-tracked and pushed to GitHub, caches are baked into the image, and only large data (project images) lives on a volume via an explicit symlink. See `/root/.claude/CLAUDE.md` (shipped in the image) for the pattern.
+- SSH pubkey auth fixed up by `post-start.sh` (normalizes RunPod's single-line `$PUBLIC_KEY` into one key per line at a `StrictModes`-safe path)
+- Runtime config of rclone / aws (both `r2-scratch` and default profiles) / wandb / git identity from RunPod template secrets (re-wired into `/root` on every boot)
 
 What it does **not** do: clone any project repo, pull any data. Bring your own. If you want a project-specific bootstrap (clone repo, `pixi install`, `dvc pull`, rclone-data-down), use one of the project-specific flavors (e.g. `gvf-germ-som-{gpu,cpu}`) or fork this one.
 
@@ -46,4 +47,5 @@ Reference the image in a RunPod template:
 - `ghcr.io/d-laub/runpod-image:gpu`
 - `ghcr.io/d-laub/runpod-image:cpu`
 
-Mount the network volume at `/workspace` so HOME persists.
+No network volume is needed — `HOME=/root` is ephemeral by design. Push code to
+GitHub before stopping a pod; nothing on disk survives a stop/redeploy.

@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 # First-shell bootstrap for gvf-germ-som on a RunPod pod.
-# Idempotent — re-runs cleanly after rm /workspace/.gvf-bootstrapped.
+# Idempotent — re-runs cleanly after rm /root/.gvf-bootstrapped.
 #
-# Fetches the project repo, installs the matching pixi env (CUDA-detected on
-# GPU image; cpu on CPU image), pulls hg38 + .gvl data via DVC, rclones the
-# cross-project mmrf.svar to data/gvl/mmrf.svar, and defensively migrates
-# any legacy .gvl link.svar symlinks to the v0.25 metadata.json svar_link.
+# Persistence model: code is EPHEMERAL on /root (re-cloned from GitHub each
+# boot); only large data persists on the /workspace network volume. We do NOT
+# symlink the repo's data/ dir wholesale — it holds git-tracked *.dvc files, so
+# replacing it with a symlink would make git see them as deleted. Instead the
+# DVC cache lives on the volume (DATA_VOL/dvc-cache) with cache.type=symlink, so
+# `dvc checkout` materializes data/ as symlinks into the persisted cache: the
+# heavy bytes live once on /workspace, the tracked .dvc files stay put. The
+# non-DVC mmrf.svar is rclone'd onto the volume and symlinked into data/gvl.
+#
+# Steps: fetch repo, install the matching pixi env (CUDA-detected on GPU image;
+# cpu on CPU image), pull hg38 + .gvl data via DVC, place mmrf.svar, and
+# defensively migrate any legacy .gvl link.svar symlinks to the v0.25 svar_link.
 
 set -euo pipefail
 
 R2_REMOTE="${R2_REMOTE:-r2-scratch:smb-data-prod-scratch}"
-VM_REPO_DIR="${VM_REPO_DIR:-/workspace/gvf-germ-som}"
+VM_REPO_DIR="${VM_REPO_DIR:-/root/gvf-germ-som}"
+DATA_VOL="${DATA_VOL:-/workspace/gvf-germ-som}"   # persistent volume root
+DVC_CACHE="${DATA_VOL}/dvc-cache"
 GITHUB_REPO='d-laub/gvf-germ-som'
 
 log() { printf '[bootstrap-gvf] %s\n' "$*" >&2; }
 
-# 1) Repo
+# 1) Repo (on ephemeral /root — clone fresh, or fast-forward if still present)
 if [[ -d ${VM_REPO_DIR}/.git ]]; then
     log "Repo present; fast-forwarding"
     git -C "${VM_REPO_DIR}" pull --ff-only
@@ -27,6 +37,16 @@ fi
 cd "${VM_REPO_DIR}"
 log "Initializing submodules"
 git submodule update --init --recursive
+
+# 1b) Point DVC's cache at the volume so pulled data persists across pods.
+# --local writes .dvc/config.local (gitignored) → repo stays clean. symlink
+# cache type keeps the bytes only in the volume cache; data/ files become
+# symlinks into it. Re-applied every boot since the repo is re-cloned.
+log "Pointing DVC cache at ${DVC_CACHE} (symlink checkout)"
+mkdir -p "${DVC_CACHE}"
+dvc cache dir --local "${DVC_CACHE}"
+dvc config --local cache.type "symlink,reflink,copy"
+dvc config --local cache.shared group
 
 # 2) Detect CUDA → pick PIXI_ENV
 detect_pixi_env() {
@@ -68,14 +88,19 @@ fi
 log "dvc pull (hg38 + data/gvl)"
 dvc pull
 
-# 6) mmrf.svar — cross-project, not DVC-tracked
+# 6) mmrf.svar — cross-project, not DVC-tracked, gitignored. Lives on the
+# volume and is symlinked into data/gvl so it persists without re-downloading.
 log "Pulling mmrf.svar from ${R2_REMOTE}/data/mmrf.svar"
-mkdir -p data/gvl
-rclone copy "${R2_REMOTE}/data/mmrf.svar" data/gvl/mmrf.svar --transfers 16
-[[ -f data/gvl/mmrf.svar/variant_idxs.npy ]] || {
+mmrf_vol="${DATA_VOL}/data/gvl/mmrf.svar"
+mkdir -p "${mmrf_vol}" data/gvl
+rclone copy "${R2_REMOTE}/data/mmrf.svar" "${mmrf_vol}" --transfers 16
+[[ -f ${mmrf_vol}/variant_idxs.npy ]] || {
     log "ERROR: mmrf.svar pull incomplete — variant_idxs.npy missing"
     exit 1
 }
+# Link it in (replace any stale non-symlink left from an older layout).
+[[ -e data/gvl/mmrf.svar && ! -L data/gvl/mmrf.svar ]] && rm -rf data/gvl/mmrf.svar
+ln -sfn "${mmrf_vol}" data/gvl/mmrf.svar
 
 # 7) Defensive: migrate any pre-v0.25 .gvl that slipped through
 if [[ -f scripts/oneshot/migrate_gvl_links.py ]]; then

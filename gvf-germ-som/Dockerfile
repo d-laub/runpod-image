@@ -1,5 +1,10 @@
 # gvf-germ-som RunPod image — GPU (default) or CPU via BASE_IMAGE build-arg.
 # See README.md for usage and the design spec for architecture.
+#
+# HOME stays /root (ephemeral container fs). Code is cloned fresh from GitHub on
+# each boot by bootstrap-gvf.sh; only large data persists, on the network volume
+# at /workspace (DVC cache + the rclone'd mmrf.svar), linked into the working
+# tree. See /root/.claude/CLAUDE.md and bootstrap-gvf.sh.
 ARG BASE_IMAGE=runpod/base:1.0.3-cuda1281-ubuntu2404
 FROM ${BASE_IMAGE}
 
@@ -13,40 +18,32 @@ RUN apt-get update \
         rsync \
     && rm -rf /var/lib/apt/lists/*
 
-# Build-time: install dlaub-togo shell + pixi globals + Claude tooling into /root
-# as the "seed template" for /workspace.
+# Build-time: install dlaub-togo shell + pixi globals + Claude tooling into /root.
 COPY setup_bash.sh /tmp/setup_bash.sh
 RUN bash /tmp/setup_bash.sh \
     && rm /tmp/setup_bash.sh
 
-# Append the runtime secret/git/bootstrap glue to /root/.bashrc (the template)
+# Append the runtime secret/git/bootstrap glue to /root/.bashrc.
 COPY extend-bashrc.sh /tmp/extend-bashrc.sh
 RUN cat /tmp/extend-bashrc.sh >> /root/.bashrc && rm /tmp/extend-bashrc.sh
 
-# Seed-on-first-login script
-COPY seed-home.sh /etc/profile.d/00-seed-home.sh
-# seed-home.sh (Task 7) will be committed at 0644 by default
+# Global Claude instructions describing the ephemeral-/root, git-for-code,
+# volume-only-for-data filesystem pattern, so pod work follows it.
+COPY CLAUDE.md /root/.claude/CLAUDE.md
 
-# Project bootstrap script (invoked from extend-bashrc.sh on first shell)
+# Project bootstrap script (invoked from extend-bashrc.sh on first shell):
+# clones the repo to /root, persists heavy data on the /workspace volume.
 COPY bootstrap-gvf.sh /usr/local/bin/bootstrap-gvf.sh
-# bootstrap-gvf.sh (Task 9) will be committed at 0755
+RUN chmod 0755 /usr/local/bin/bootstrap-gvf.sh
 
-# Make /workspace root's HOME; keep /root as the seed template.
-# `usermod -d` errors with exit code 8 ("user currently logged in") in some
-# docker build contexts (PAM/utmp leakage from the base image). Edit
-# /etc/passwd directly to bypass the safety check — same result.
-RUN sed -i 's|^\(root:[^:]*:0:0:[^:]*:\)/root:|\1/workspace:|' /etc/passwd
-ENV HOME=/workspace
-ENV PATH=/workspace/.pixi/bin:/root/.pixi/bin:/root/.cargo/bin:${PATH}
+ENV PATH=/root/.pixi/bin:/root/.cargo/bin:${PATH}
 
-# SSH pubkey auth, decoupled from HOME=/workspace. RunPod's setup_ssh writes
-# keys to $HOME/.ssh = /workspace/.ssh, but /workspace is a network volume that
-# is permanently mode 777 and ignores chmod; with StrictModes yes, sshd refuses
-# any authorized_keys under a world-writable path and silently falls back to a
-# password prompt. So we pin AuthorizedKeysFile to a root-owned path on the
-# container filesystem (perms honored, StrictModes satisfied) and let
-# post-start.sh populate it from $PUBLIC_KEY. See post-start.sh for the full
-# rationale (also handles RunPod concatenating multiple keys onto one line).
+# SSH pubkey auth. RunPod's setup_ssh does `echo "$PUBLIC_KEY" >> ~/.ssh/...`,
+# writing every team key onto ONE line — sshd then honors only the first key
+# (the rest fall into the comment field) and everyone else hits a password
+# prompt. post-start.sh re-splits them one per line. We pin AuthorizedKeysFile
+# to a fixed root-owned path (independent of HOME and of any network volume,
+# whose 777/chmod-ignoring perms would trip StrictModes). See post-start.sh.
 RUN mkdir -p /etc/ssh/keys \
     && chmod 0755 /etc/ssh/keys \
     && sed -i '/^#\?AuthorizedKeysFile/d;/^#\?StrictModes/d' /etc/ssh/sshd_config \
@@ -57,4 +54,4 @@ RUN mkdir -p /etc/ssh/keys \
 COPY post-start.sh /post_start.sh
 RUN chmod 0755 /post_start.sh
 
-WORKDIR /workspace
+WORKDIR /root

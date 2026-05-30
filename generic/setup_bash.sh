@@ -5,9 +5,8 @@
 # clones upstream, strips the hardcoded git identity (set at runtime from
 # RunPod secrets in extend-bashrc.sh), and runs it from within the cloned dir.
 #
-# Runs with HOME=/root (the seed template). The Dockerfile follows up with a
-# /etc/passwd edit that makes /workspace root's HOME, and
-# /etc/profile.d/00-seed-home.sh rsyncs /root/ → /workspace/ on first boot.
+# Runs with HOME=/root, which is also the runtime HOME — the install lands in
+# the same place it's used. /root is ephemeral (no network-volume persistence).
 
 set -euo pipefail
 

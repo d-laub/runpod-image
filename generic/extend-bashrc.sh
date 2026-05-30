@@ -1,5 +1,5 @@
-# Appended to /root/.bashrc at build time; seeded to /workspace/.bashrc on
-# first login by /etc/profile.d/00-seed-home.sh. Runs on every shell.
+# Appended to /root/.bashrc at build time. Runs on every interactive shell.
+# /root is ephemeral, so the secret/git wiring below re-applies on each boot.
 
 # Load RunPod-injected env vars (rp_environment exports the template secrets)
 if [[ -f /etc/rp_environment ]]; then

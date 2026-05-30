@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 # Installed at /post_start.sh; RunPod's start.sh runs it after setup_ssh.
 #
-# Two problems this fixes, both stemming from HOME=/workspace (which we keep,
-# so runtime caches/installs persist on the volume across pause/resume):
+# RunPod's setup_ssh does `echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys`,
+# writing the entire variable as ONE line. When the team PUBLIC_KEY concatenates
+# several keys with spaces, sshd honors only the first key (keytype base64
+# comment — the comment runs to end-of-line, swallowing every trailing key), so
+# everyone but the first key hits a password prompt. We rewrite the keys one per
+# line, deduped, into the AuthorizedKeysFile the Dockerfile pins.
 #
-#   1. RunPod's setup_ssh does `echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys`,
-#      writing the entire variable as ONE line. When the team PUBLIC_KEY
-#      concatenates several keys with spaces, sshd honors only the first key
-#      (keytype base64 comment — the comment runs to end-of-line, swallowing
-#      every trailing key). Everyone but the first key hits a password prompt.
-#
-#   2. ~/.ssh resolves to /workspace/.ssh, and /workspace is a RunPod network
-#      volume that is permanently mode 777 and ignores chmod. With
-#      StrictModes yes, sshd refuses to read an authorized_keys under any
-#      world-writable path — so pubkey auth is skipped entirely.
-#
-# So we DON'T put authorized_keys on the volume. We write the keys, one per
-# line, to a root-owned path on the container filesystem (AuthorizedKeysFile is
-# pinned there in the Dockerfile). chmod is honored there, StrictModes stays on.
-# sshd re-reads the file per connection, so this also fixes a live pod.
+# That pin is a fixed root-owned path on the container filesystem, deliberately
+# NOT $HOME/.ssh: it stays correct regardless of HOME, and avoids ever landing
+# on a RunPod network volume (mode 777, ignores chmod) which StrictModes would
+# reject. chmod is honored here, StrictModes stays on. sshd re-reads the file
+# per connection, so this also fixes a live pod.
 #
 # AUTH_KEYS is overridable for tests; default matches the Dockerfile pin.
 set -euo pipefail

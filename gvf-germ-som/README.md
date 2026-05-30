@@ -13,12 +13,15 @@ Docker images for RunPod pods that boot directly into a working
 - **Shell:** oh-my-bash with agnoster-multiline theme, pixi global tools
   (rg, bat, fd, zoxide, dvc, rclone, awscli, uv, wandb, …), Rust toolchain,
   Claude Code + RTK + tilth + superpowers plugin, marimo skills.
-- **HOME = `/workspace`:** all dotfiles, caches, and `pixi global install`
-  results persist across pod pause/resume via the RunPod network volume.
-  Seeded on first login from `/root` template via `/etc/profile.d/`.
-- **First-shell bootstrap:** clones `standardmodelbio/gvf-germ-som`,
-  installs the matching pixi env (CUDA-detected), `dvc pull` for hg38 +
-  `.gvl` data, rclone copy `mmrf.svar` from R2.
+- **HOME = `/root` (ephemeral).** Code and shell state are not persisted; the
+  repo is re-cloned from GitHub on each boot. Only large **data** persists, on
+  the RunPod network volume at `/workspace/gvf-germ-som` (the DVC cache + the
+  rclone'd `mmrf.svar`), symlinked into the working tree. See the shipped
+  `/root/.claude/CLAUDE.md`.
+- **First-shell bootstrap:** clones `d-laub/gvf-germ-som` to
+  `/root/gvf-germ-som`, installs the matching pixi env (CUDA-detected), points
+  the DVC cache at the volume and `dvc pull`s hg38 + `.gvl` data (symlink
+  checkout), and rclones `mmrf.svar` from R2 onto the volume.
 
 ## Required RunPod template secrets
 
@@ -33,7 +36,8 @@ Docker images for RunPod pods that boot directly into a working
 | `GIT_USER_EMAIL`    | optional | git identity email (gh fallback)               |
 
 Optional tunables: `R2_REMOTE` (default `r2-scratch:smb-data-prod-scratch`),
-`VM_REPO_DIR` (default `/workspace/gvf-germ-som`), `GVF_SKIP_BOOTSTRAP=1`.
+`VM_REPO_DIR` (default `/root/gvf-germ-som`), `DATA_VOL` (volume root, default
+`/workspace/gvf-germ-som`), `GVF_SKIP_BOOTSTRAP=1`.
 
 ## Build locally
 
