@@ -110,9 +110,17 @@ Low. Runtime re-download on first install (accepted). Someone wanting rust-docs
 runs one `rustup component add`. The `~/.cache/*` catch-all only clears
 regenerable caches; Claude/plugin config lives under `~/.claude`, untouched.
 
-## Expected outcome
+## Measured outcome (published CPU image, before → after)
 
-~1.3 GB smaller generic image (≈800 MB rust-docs + ≈400 MB cache-unique +
-misc), roughly halving `/root` → faster RunPod pull/load and faster CI push;
-build time ~unchanged; GHA layer caching preserved (still one install layer).
-gvf-germ-som shrinks by the same base delta.
+- **On-disk footprint (`du /root`): 4.1 GB → 2.8 GB (−1.3 GB, ~32%).** This is
+  what the pod stores and must decompress — the substantial win.
+- **Compressed pull size: 1.93 GB → 1.74 GB (−190 MB, ~10%).** Smaller because
+  the biggest disk item removed (rust-docs HTML) gzips to a fraction, and the
+  rattler bytes were largely hardlink-shared with kept envs.
+
+So: meaningfully less pod disk + decompression, a modest pull-time win, no
+downside (tools intact; rust-docs re-addable). Build time ~unchanged; GHA layer
+caching preserved (still one install layer). gvf-germ-som inherits the same
+delta. The remaining bulk (~1.9 GB `.pixi` envs) is the tools themselves;
+shrinking further would mean dropping tools or multi-stage (deliberately out of
+scope).
