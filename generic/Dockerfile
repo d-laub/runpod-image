@@ -31,6 +31,10 @@ COPY setup_bash.sh /tmp/setup_bash.sh
 RUN bash /tmp/setup_bash.sh \
     && rm /tmp/setup_bash.sh
 
+# Sets CPU affinity + thread-count env vars from CFS quota on every login shell
+# and job runner entry point that uses bash -l / bash --login.
+COPY cgroup-threads.sh /etc/profile.d/cgroup-threads.sh
+
 # Append runtime secret/git glue to /root/.bashrc.
 COPY extend-bashrc.sh /tmp/extend-bashrc.sh
 RUN cat /tmp/extend-bashrc.sh >> /root/.bashrc && rm /tmp/extend-bashrc.sh

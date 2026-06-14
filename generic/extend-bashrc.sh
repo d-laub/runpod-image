@@ -49,3 +49,8 @@ fi
 if [[ -n ${WANDB_API_KEY:-} && ! -f ${HOME}/.netrc ]] && command -v wandb >/dev/null 2>&1; then
     wandb login --relogin "$WANDB_API_KEY" >/dev/null 2>&1 || true
 fi
+
+# Enforce cgroup CPU quota via affinity mask + thread-count env vars.
+# Covers interactive non-login shells; login shells get it via /etc/profile.d/.
+# shellcheck source=/etc/profile.d/cgroup-threads.sh
+source /etc/profile.d/cgroup-threads.sh

@@ -10,6 +10,8 @@
 # Override cgroup paths for testing:
 #   _CGROUP_V2_CPU_MAX, _CGROUP_V1_QUOTA, _CGROUP_V1_PERIOD
 
+[ -n "$BASH_VERSION" ] || return 0
+
 [[ -n ${_CGROUP_THREADS_APPLIED:-} ]] && return 0
 
 _cgroup_cpu_limit() {
