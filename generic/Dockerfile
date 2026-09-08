@@ -9,7 +9,10 @@
 # symlink. /root/.claude/CLAUDE.md documents this pattern for pod work.
 #
 # Build args:
-#   BASE_IMAGE — runpod/base GPU (default) or CPU.
+#   BASE_IMAGE     — runpod/base GPU (default) or CPU.
+#   DLAUB_TOGO_REF — upstream d-laub/dlaub-togo commit (or branch) to install.
+#                    CI pins a resolved SHA so an upstream change busts that
+#                    layer's cache; local builds default to the `main` tip.
 
 ARG BASE_IMAGE=runpod/base:1.0.3-cuda1281-ubuntu2404
 FROM ${BASE_IMAGE}
@@ -27,8 +30,9 @@ RUN apt-get update \
 # Build-time: install dlaub-togo shell + pixi globals + Claude tooling into
 # /root. setup_bash.sh is a thin wrapper that clones upstream dlaub-togo and
 # runs its setup_bash.sh after a minimal overlay.
+ARG DLAUB_TOGO_REF=main
 COPY setup_bash.sh /tmp/setup_bash.sh
-RUN bash /tmp/setup_bash.sh \
+RUN DLAUB_TOGO_REF="${DLAUB_TOGO_REF}" bash /tmp/setup_bash.sh \
     && rm /tmp/setup_bash.sh
 
 # Sets CPU affinity + thread-count env vars from CFS quota on every login shell

@@ -10,11 +10,22 @@
 
 set -euo pipefail
 
+# Upstream commit to install. CI pins this to a resolved SHA so this layer's
+# Docker cache key tracks upstream: changed -> real rebuild, unchanged -> cache
+# hit. Local builds default to the branch tip.
+dlaub_togo_ref="${DLAUB_TOGO_REF:-main}"
+
 dlaub_togo_dir=$(mktemp -d)
 trap 'rm -rf "${dlaub_togo_dir}"' EXIT
 
-git clone --depth 1 --branch main https://github.com/d-laub/dlaub-togo.git "${dlaub_togo_dir}"
+# `clone --branch` rejects a raw SHA; fetch-by-ref takes either a SHA or a
+# branch name and stays a shallow single-commit fetch both ways.
+git -C "${dlaub_togo_dir}" init -q -b main
+git -C "${dlaub_togo_dir}" fetch -q --depth 1 \
+    https://github.com/d-laub/dlaub-togo.git "${dlaub_togo_ref}"
+git -C "${dlaub_togo_dir}" checkout -q FETCH_HEAD
 cd "${dlaub_togo_dir}"
+echo "dlaub-togo: installing ${dlaub_togo_ref} -> $(git rev-parse HEAD)"
 
 # RunPod overlay: strip the two hardcoded `git config --global user.{email,name}`
 # lines. Identity is set at pod-start from RunPod template secrets. Fail loudly
