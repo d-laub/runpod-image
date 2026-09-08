@@ -1,10 +1,20 @@
 name: Docker image
 
+# Builds run on changes to this repo AND on changes to the upstream shell
+# environment (d-laub/dlaub-togo), which the generic image installs at build
+# time:
+#   - schedule            — daily poll; needs no cross-repo credentials, and is
+#                           a true no-op when upstream hasn't moved.
+#   - repository_dispatch — instant path, fired by a workflow in dlaub-togo.
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  schedule:
+    - cron: "17 7 * * *"
+  repository_dispatch:
+    types: [dlaub-togo-updated]
   workflow_dispatch:
 
 permissions:
@@ -12,9 +22,84 @@ permissions:
   packages: write
 
 jobs:
+  # Stage 0 — resolve the upstream dlaub-togo commit this build will install,
+  # and decide whether a scheduled run has anything to do.
+  #
+  # Pinning matters for more than provenance: the install is a single
+  # `RUN bash /tmp/setup_bash.sh` layer, so without an input that tracks
+  # upstream the GHA layer cache would hand back the stale layer and a
+  # "rebuild" would republish the old shell environment.
+  resolve:
+    concurrency:
+      group: docker-image-${{ github.workflow }}-${{ github.ref }}-resolve
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    outputs:
+      togo_sha: ${{ steps.togo.outputs.sha }}
+      build_id: ${{ steps.togo.outputs.build_id }}
+      changed: ${{ steps.probe.outputs.changed }}
+    steps:
+      - name: Image name (Docker requires lowercase)
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      # build_id addresses an image by BOTH of its inputs, so a per-commit tag
+      # stays immutable even though upstream can now trigger a rebuild of the
+      # same repo commit.
+      - name: Resolve dlaub-togo HEAD
+        id: togo
+        run: |
+          sha=$(git ls-remote https://github.com/d-laub/dlaub-togo.git refs/heads/main | cut -f1)
+          if [ -z "$sha" ]; then
+            echo "::error::could not resolve d-laub/dlaub-togo main"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "build_id=${GITHUB_SHA::7}-t${sha::7}" >> "$GITHUB_OUTPUT"
+          echo "dlaub-togo main = $sha"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only the scheduled poll can be a no-op. Every other event means this
+      # repo (or a human) asked for a build, so it always builds.
+      - name: Has anything changed?
+        id: probe
+        env:
+          BUILD_ID: ${{ steps.togo.outputs.build_id }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A probe failure is treated as "absent" — a false negative costs one
+          # fully-cached build, a false positive would skip a needed rebuild.
+          missing=0
+          for variant in gpu cpu; do
+            tag="ghcr.io/${IMAGE_NAME}:${variant}-${BUILD_ID}"
+            if docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+              echo "present: $tag"
+            else
+              echo "absent:  $tag"
+              missing=1
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing new upstream — skipping build."
+          fi
+
   # Stage 1 — the generic base image. Owns the bare :latest/:gpu/:cpu tags and
-  # an immutable per-commit :{gpu,cpu}-<sha> tag that downstream flavors pin to.
+  # an immutable per-build :{gpu,cpu}-<build_id> tag that downstream flavors
+  # pin to.
   generic:
+    needs: resolve
+    if: needs.resolve.outputs.changed == 'true'
     concurrency:
       group: docker-image-${{ github.workflow }}-${{ github.ref }}-generic-${{ matrix.variant }}
       cancel-in-progress: true
@@ -25,17 +110,11 @@ jobs:
         include:
           - variant: gpu
             base_image: runpod/base:1.0.3-cuda1281-ubuntu2404
-            meta_tags: |
-              type=raw,value=latest,enable={{is_default_branch}}
-              type=raw,value=gpu
-              type=ref,event=branch
-              type=sha,prefix=gpu-
+            # The GPU image is the default flavor, so it alone owns bare :latest.
+            extra_tags: type=raw,value=latest,enable={{is_default_branch}}
           - variant: cpu
             base_image: runpod/base:1.0.3-ubuntu2404
-            meta_tags: |
-              type=raw,value=cpu
-              type=ref,event=branch
-              type=sha,prefix=cpu-
+            extra_tags: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -59,7 +138,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_NAME }}
-          tags: ${{ matrix.meta_tags }}
+          # The branch tag carries the variant suffix: without it both matrix
+          # legs would race to publish the same `:main` tag.
+          tags: |
+            type=raw,value=${{ matrix.variant }}
+            type=raw,value=${{ matrix.variant }}-${{ needs.resolve.outputs.build_id }}
+            type=ref,event=branch,suffix=-${{ matrix.variant }}
+            ${{ matrix.extra_tags }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -70,13 +155,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BASE_IMAGE=${{ matrix.base_image }}
+            DLAUB_TOGO_REF=${{ needs.resolve.outputs.togo_sha }}
           cache-from: type=gha,scope=generic-${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=generic-${{ matrix.variant }}
 
   # Stage 2 — project flavors layered ON TOP of the generic image (FROM it).
   # Each waits for `generic`, then builds against the matching generic variant.
+  # A flavor's directory name is its build context and its tag prefix, so
+  # adding one means adding one name to `flavor` below.
   flavors:
-    needs: generic
+    needs: [resolve, generic]
     concurrency:
       group: docker-image-${{ github.workflow }}-${{ github.ref }}-${{ matrix.flavor }}-${{ matrix.variant }}
       cancel-in-progress: true
@@ -84,21 +172,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - flavor: gvf-germ-som
-            variant: gpu
-            context: gvf-germ-som
-            from_tag: gpu
-            meta_tags: |
-              type=raw,value=gvf-germ-som-gpu
-              type=sha,prefix=gvf-germ-som-gpu-
-          - flavor: gvf-germ-som
-            variant: cpu
-            context: gvf-germ-som
-            from_tag: cpu
-            meta_tags: |
-              type=raw,value=gvf-germ-som-cpu
-              type=sha,prefix=gvf-germ-som-cpu-
+        flavor: [gvf-germ-som]
+        variant: [gpu, cpu]
     steps:
       - uses: actions/checkout@v4
 
@@ -119,11 +194,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             # PRs don't push generic — build on the last main generic image.
-            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.from_tag }}" >> "$GITHUB_ENV"
+            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.variant }}" >> "$GITHUB_ENV"
           else
-            # Immutable per-commit tag the `generic` job just pushed (7-char
-            # short sha matches docker/metadata-action's type=sha default).
-            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.from_tag }}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+            # Immutable per-build tag the `generic` job just pushed.
+            echo "BASE_IMAGE=ghcr.io/${IMAGE_NAME}:${{ matrix.variant }}-${{ needs.resolve.outputs.build_id }}" >> "$GITHUB_ENV"
           fi
 
       - name: Docker metadata
@@ -131,12 +205,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ env.IMAGE_NAME }}
-          tags: ${{ matrix.meta_tags }}
+          tags: |
+            type=raw,value=${{ matrix.flavor }}-${{ matrix.variant }}
+            type=raw,value=${{ matrix.flavor }}-${{ matrix.variant }}-${{ needs.resolve.outputs.build_id }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
+          context: ${{ matrix.flavor }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
