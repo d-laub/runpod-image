@@ -69,16 +69,19 @@ docker build \
 ## CI
 
 [`.github/workflows/docker-image.yml`](.github/workflows/docker-image.yml) runs
-in three stages:
+in four stages:
 
-1. **`resolve`** — resolves `d-laub/dlaub-togo@main` to a commit SHA and derives
+1. **`test`** — runs `bats generic/test/`. This **gates** the image build:
+   `cgroup-threads.sh` ships to `/etc/profile.d/`, so a regression in it breaks
+   every login shell of every pod started from these images.
+2. **`resolve`** — resolves `d-laub/dlaub-togo@main` to a commit SHA and derives
    `build_id`. On a *scheduled* run it also probes GHCR for
    `:{gpu,cpu}-<build_id>`; if both already exist, nothing upstream moved and
    every later stage is skipped.
-2. **`generic`** — builds the base GPU/CPU images and pushes `:latest` / `:gpu`
-   / `:cpu` plus the immutable `:{gpu,cpu}-<build_id>` tag. The resolved
-   upstream SHA is passed as the `DLAUB_TOGO_REF` build-arg.
-3. **`flavors`** (`needs: generic`) — each flavor is built `FROM` the matching
+3. **`generic`** (`needs: [test, resolve]`) — builds the base GPU/CPU images and
+   pushes `:latest` / `:gpu` / `:cpu` plus the immutable `:{gpu,cpu}-<build_id>`
+   tag. The resolved upstream SHA is passed as the `DLAUB_TOGO_REF` build-arg.
+4. **`flavors`** (`needs: generic`) — each flavor is built `FROM` the matching
    per-build generic tag, so flavors never re-implement the base.
 
 PRs build but don't push; on a PR the flavors build `FROM` the last `main`
@@ -92,7 +95,8 @@ at build time, so upstream commits must reach the published images. Two triggers
 cover this:
 
 - **Daily `schedule`** — always active, no credentials needed. Cheap: when
-  upstream is unchanged the `resolve` probe short-circuits the whole run.
+  upstream is unchanged the `resolve` probe short-circuits every build stage,
+  leaving only `test` and two registry lookups.
 - **`repository_dispatch` (`dlaub-togo-updated`)** — the instant path, fired by
   `.github/workflows/notify-runpod-image.yml` in `dlaub-togo`. That workflow
   no-ops until the `RUNPOD_IMAGE_DISPATCH_TOKEN` secret (a PAT with `repo`

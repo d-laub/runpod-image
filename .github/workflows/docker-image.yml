@@ -22,6 +22,23 @@ permissions:
   packages: write
 
 jobs:
+  # Shell test suite. This GATES the image build rather than running alongside
+  # it: cgroup-threads.sh is installed to /etc/profile.d/, so a regression in it
+  # breaks every login shell of every pod started from these images. Publishing
+  # that and finding out later is worse than a red build.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+
+      - name: Run shell test suite
+        run: bats --print-output-on-failure generic/test/
+
   # Stage 0 — resolve the upstream dlaub-togo commit this build will install,
   # and decide whether a scheduled run has anything to do.
   #
@@ -98,7 +115,7 @@ jobs:
   # an immutable per-build :{gpu,cpu}-<build_id> tag that downstream flavors
   # pin to.
   generic:
-    needs: resolve
+    needs: [test, resolve]
     if: needs.resolve.outputs.changed == 'true'
     concurrency:
       group: docker-image-${{ github.workflow }}-${{ github.ref }}-generic-${{ matrix.variant }}
