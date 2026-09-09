@@ -1,3 +1,7 @@
+# shellcheck shell=bash
+# Sourced, never executed — no shebang by design; the directive above is what
+# lets shellcheck know the target shell.
+#
 # Detects the container's CFS CPU quota and enforces it via:
 #   1. CPU affinity mask (taskset) — fixes sched_getaffinity-based discovery
 #      (glibc nproc, Python os.sched_getaffinity, OpenMP, Rust num_cpus/Rayon)
@@ -9,6 +13,13 @@
 #
 # Override cgroup paths for testing:
 #   _CGROUP_V2_CPU_MAX, _CGROUP_V1_QUOTA, _CGROUP_V1_PERIOD
+#
+# Fractional quotas round DOWN. A 2.5-core quota yields 2 threads, not 3:
+# rounding up over-subscribes the quota and reintroduces the CFS throttling this
+# script exists to prevent, and the throttling costs more in tail latency than
+# leaving a fraction of a core idle. Quotas below one core floor to 0 and are
+# raised to 1 by the clamp on _N, which is the only case where 1 is a floor
+# rather than a measurement.
 
 [ -n "$BASH_VERSION" ] || return 0
 
@@ -23,7 +34,7 @@ _cgroup_cpu_limit() {
     if [[ -f $v2 ]]; then
         read -r quota period < "$v2"
         if [[ $quota != max ]]; then
-            echo $(( (quota + period - 1) / period ))
+            echo $(( quota / period ))
             return
         fi
     fi
@@ -32,7 +43,7 @@ _cgroup_cpu_limit() {
         quota=$(< "$v1q")
         period=$(< "$v1p")
         if (( quota > 0 )); then
-            echo $(( (quota + period - 1) / period ))
+            echo $(( quota / period ))
             return
         fi
     fi

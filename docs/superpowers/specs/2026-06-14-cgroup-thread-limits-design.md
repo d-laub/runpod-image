@@ -100,3 +100,10 @@ The last gap is intentional and out of scope for the generic image.
 - Quota of `max` / `-1`: treated as no limit, falls through to next detection level or
   `nproc`.
 - Result floored at 1 to prevent `taskset -cp 0--1 $$`.
+- Fractional quotas round **down**: a 2.5-core quota yields 2 threads, not 3.
+  Rounding up over-subscribes the quota and reintroduces the CFS throttling this
+  design exists to prevent, and that throttling costs more in tail latency than
+  leaving a fraction of a core idle. Quotas below one core floor to 0 and are
+  raised by the clamp above — the only case where the result is a floor rather
+  than a measurement. (Decided 2026-09-09; the original implementation rounded
+  up, untested and unstated. See issue #3.)
