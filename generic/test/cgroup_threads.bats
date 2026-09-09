@@ -41,6 +41,14 @@ _run() {
     [ "$result" = "4" ]
 }
 
+@test "cgroup v2: fractional quota rounds down" {
+    # 2.5 cores → 2 threads. Rounding up would over-subscribe the quota and
+    # reintroduce the CFS throttling this script exists to prevent.
+    echo "250000 100000" > "$TMPD/v2/cpu.max"
+    result=$(_run "$TMPD/v2/cpu.max" /nonexistent /nonexistent)
+    [ "$result" = "2" ]
+}
+
 @test "cgroup v2: quota=max falls through to v1" {
     echo "max 100000" > "$TMPD/v2/cpu.max"
     echo "800000" > "$TMPD/v1/cpu/quota"
@@ -51,6 +59,13 @@ _run() {
 
 @test "cgroup v1: positive quota yields correct thread count" {
     echo "200000" > "$TMPD/v1/cpu/quota"
+    echo "100000" > "$TMPD/v1/cpu/period"
+    result=$(_run /nonexistent "$TMPD/v1/cpu/quota" "$TMPD/v1/cpu/period")
+    [ "$result" = "2" ]
+}
+
+@test "cgroup v1: fractional quota rounds down" {
+    echo "250000" > "$TMPD/v1/cpu/quota"
     echo "100000" > "$TMPD/v1/cpu/period"
     result=$(_run /nonexistent "$TMPD/v1/cpu/quota" "$TMPD/v1/cpu/period")
     [ "$result" = "2" ]
