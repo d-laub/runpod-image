@@ -11,6 +11,15 @@ if command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
     gh auth setup-git 2>/dev/null || true
 fi
 
+# Private-repo skills are kept out of the public image (see setup_bash.sh).
+# Install them once per boot, in the background, via the git auth wired above.
+# The lock dir makes this run once even with many shells; the log records it.
+_deferred_skills=${HOME}/.local/share/runpod-image/deferred-skills.sh
+if [[ -s $_deferred_skills && -n ${GITHUB_TOKEN:-} ]] && mkdir "${_deferred_skills%.sh}.lock" 2>/dev/null; then
+    (bash "$_deferred_skills" >"${_deferred_skills%.sh}.log" 2>&1 &)
+fi
+unset _deferred_skills
+
 # Runtime git identity: prefer GIT_USER_* secrets, fall back to gh-resolved
 _set_git_identity() {
     local name="${GIT_USER_NAME:-}"
