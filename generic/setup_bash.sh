@@ -36,6 +36,24 @@ p = pathlib.Path("setup_bash.sh")
 s = p.read_text()
 new, n = re.subn(r'^git config --global user\.(email|name) .*\n', '', s, flags=re.M)
 assert n == 2, f"expected 2 git-identity lines to strip, found {n} — upstream dlaub-togo changed shape"
+
+# Skills from private repos can't be cloned here (no credentials) and must not
+# be baked into the public image. Defer them to pod start, where
+# extend-bashrc.sh installs them with the GITHUB_TOKEN RunPod secret.
+import os, subprocess
+def is_public(repo: str) -> bool:
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    r = subprocess.run(["git", "ls-remote", f"https://github.com/{repo}.git", "HEAD"],
+                       env=env, capture_output=True)
+    return r.returncode == 0
+skill_line = re.compile(r'^npx -y skills add ([\w.-]+/[\w.-]+)\s.*$', flags=re.M)
+deferred = [m.group(0) for m in skill_line.finditer(new) if not is_public(m.group(1))]
+for line in deferred:
+    new = new.replace(line + "\n", "")
+    print(f"dlaub-togo: deferring private skill to pod start: {line}")
+out = pathlib.Path.home() / ".local/share/runpod-image/deferred-skills.sh"
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text("set -uo pipefail\n" + "".join(f"{l}\n" for l in deferred))
 p.write_text(new)
 PY
 
