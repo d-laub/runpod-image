@@ -38,3 +38,22 @@ _run() {
     result=$(_run WANDB_PROJECT)
     [ "$result" = "from-secret" ]
 }
+
+# dlaub-togo's .bashrc sets `alias mkdir='mkdir -pv'` and `noclobber`, and
+# aliases expand inside .bashrc. `mkdir -p` never fails, which used to defeat
+# the once-per-boot lock: every shell re-ran the install (blocked only by
+# noclobber refusing to overwrite the log, with an error on every shell).
+@test "deferred skills run once per boot under dlaub-togo's mkdir alias and noclobber" {
+    mkdir -p "$TMPD/.local/share/runpod-image"
+    echo "echo ran >> '$TMPD/runs'" > "$TMPD/.local/share/runpod-image/deferred-skills.sh"
+    for _ in 1 2 3; do
+        env -i PATH=/usr/bin:/bin HOME="$TMPD" GITHUB_TOKEN=x \
+            _RP_ENVIRONMENT=/nonexistent _CGROUP_THREADS_APPLIED=1 \
+            bash --norc --noprofile -c "
+                shopt -s expand_aliases; alias mkdir='mkdir -pv'; set -o noclobber
+                source '$SCRIPT'" 2>> "$TMPD/stderr" || true
+    done
+    sleep 1   # the install runs in the background
+    [ "$(wc -l < "$TMPD/runs")" -eq 1 ]
+    ! grep -q 'cannot overwrite' "$TMPD/stderr"
+}
