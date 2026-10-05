@@ -1,0 +1,16 @@
+# Persistent /workspace volume — the CoreWeave counterpart of a RunPod network
+# volume. Holds large data only (datasets, DVC cache, weights); code lives in
+# git on the ephemeral /root, same as on RunPod.
+#
+# shared-vast's reclaimPolicy is Retain: deleting this PVC releases the claim
+# but keeps (and bills) the underlying volume until the PV is deleted too.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: shared-vast
+  resources:
+    requests:
+      storage: 1Ti

@@ -1,10 +1,18 @@
 # Appended to /root/.bashrc at build time. Runs on every interactive shell.
 # /root is ephemeral, so the secret/git wiring below re-applies on each boot.
 
-# Load RunPod-injected env vars (rp_environment exports the template secrets)
-if [[ -f /etc/rp_environment ]]; then
-    source /etc/rp_environment
+# Load RunPod-injected env vars (rp_environment exports the template secrets).
+# The base image's /start.sh dumps the WHOLE container env there, PATH included,
+# so restore PATH afterwards: the bare container PATH would otherwise drop the
+# ~/.local/bin (claude) and other entries .bashrc added above.
+# _RP_ENVIRONMENT overrides the path for testing.
+if [[ -f ${_RP_ENVIRONMENT:=/etc/rp_environment} ]]; then
+    _path=$PATH
+    source "$_RP_ENVIRONMENT"
+    PATH=$_path
+    unset _path
 fi
+unset _RP_ENVIRONMENT
 
 # Configure git over HTTPS using gh-resolved GITHUB_TOKEN
 if command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
@@ -14,9 +22,12 @@ fi
 # Private-repo skills are kept out of the public image (see setup_bash.sh).
 # Install them once per boot, in the background, via the git auth wired above.
 # The lock dir makes this run once even with many shells; the log records it.
+# `command mkdir` bypasses dlaub-togo's `alias mkdir='mkdir -pv'` (aliases
+# expand in .bashrc), whose -p never fails and would defeat the lock; `>|`
+# writes the log despite its noclobber.
 _deferred_skills=${HOME}/.local/share/runpod-image/deferred-skills.sh
-if [[ -s $_deferred_skills && -n ${GITHUB_TOKEN:-} ]] && mkdir "${_deferred_skills%.sh}.lock" 2>/dev/null; then
-    (bash "$_deferred_skills" >"${_deferred_skills%.sh}.log" 2>&1 &)
+if [[ -s $_deferred_skills && -n ${GITHUB_TOKEN:-} ]] && command mkdir "${_deferred_skills%.sh}.lock" 2>/dev/null; then
+    (bash "$_deferred_skills" >|"${_deferred_skills%.sh}.log" 2>&1 &)
 fi
 unset _deferred_skills
 
