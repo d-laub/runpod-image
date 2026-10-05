@@ -1,6 +1,7 @@
 # RunPod images (d-laub)
 
-One repo, multiple **flavors** of RunPod docker images. Each flavor lives in
+One repo, multiple **flavors** of RunPod docker images (which also run
+unchanged on CoreWeave — see [`coreweave/`](coreweave)). Each flavor lives in
 its own subdirectory with its own `Dockerfile` + supporting scripts. CI matrix
 builds GPU and CPU variants of every flavor and pushes them to
 `ghcr.io/d-laub/runpod-image:*`.
@@ -25,6 +26,12 @@ Same generic base, plus an idempotent first-shell bootstrap that clones
 runs `pixi install` for the matching CUDA env, `dvc pull` for hg38 + .gvl
 data, and rclones the cross-project `mmrf.svar` as a sibling of the `.gvl`
 directories. See [`gvf-germ-som/README.md`](gvf-germ-som/README.md).
+
+### [`coreweave/`](coreweave) — running on CoreWeave
+
+Not a flavor (no image of its own): Kubernetes manifests that run `:gpu` on a
+CoreWeave node, with a Secret in place of RunPod template secrets and a
+`shared-vast` PVC as `/workspace`. See [`coreweave/README.md`](coreweave/README.md).
 
 ## Tag matrix
 

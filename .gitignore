@@ -1,0 +1,2 @@
+# Local secret env files (e.g. for the CoreWeave Secret) — never commit.
+.env*

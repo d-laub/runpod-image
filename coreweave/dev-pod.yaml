@@ -1,0 +1,45 @@
+# Interactive dev pod on a full rtxp6000-8x node, running the same image as
+# RunPod. The image's /start.sh is platform-neutral: it dumps the container env
+# to /etc/rp_environment (which .bashrc sources) and starts sshd if PUBLIC_KEY
+# is set, so the Secret below wires git/rclone/aws/wandb exactly as RunPod
+# template secrets do.
+#
+#   kubectl apply -f coreweave/workspace-pvc.yaml -f coreweave/dev-pod.yaml
+#   kubectl exec -it dev -- bash
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dev
+spec:
+  nodeSelector:
+    node.kubernetes.io/instance-type: rtxp6000-8x
+  restartPolicy: Never
+  containers:
+    - name: dev
+      image: ghcr.io/d-laub/runpod-image:gpu
+      imagePullPolicy: Always
+      # optional: the pod starts without the Secret, with the matching
+      # features inert (same contract as RunPod template secrets).
+      envFrom:
+        - secretRef:
+            name: runpod-image-secrets
+            optional: true
+      resources:
+        # limits only, so requests == limits. Leaves headroom for the node's
+        # daemonsets (~6 CPU, ~20 Gi requested).
+        limits:
+          nvidia.com/gpu: 8
+          cpu: "120"
+          memory: 960Gi
+      ports:
+        - { name: ssh, containerPort: 22 }
+      volumeMounts:
+        - { name: workspace, mountPath: /workspace }
+        - { name: dshm, mountPath: /dev/shm }
+  volumes:
+    - name: workspace
+      persistentVolumeClaim: { claimName: workspace }
+    # PyTorch DataLoader workers pass batches through /dev/shm; the 64 Mi
+    # container default makes them crash with bus errors.
+    - name: dshm
+      emptyDir: { medium: Memory, sizeLimit: 64Gi }
