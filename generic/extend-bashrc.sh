@@ -1,10 +1,18 @@
 # Appended to /root/.bashrc at build time. Runs on every interactive shell.
 # /root is ephemeral, so the secret/git wiring below re-applies on each boot.
 
-# Load RunPod-injected env vars (rp_environment exports the template secrets)
-if [[ -f /etc/rp_environment ]]; then
-    source /etc/rp_environment
+# Load RunPod-injected env vars (rp_environment exports the template secrets).
+# The base image's /start.sh dumps the WHOLE container env there, PATH included,
+# so restore PATH afterwards: the bare container PATH would otherwise drop the
+# ~/.local/bin (claude) and other entries .bashrc added above.
+# _RP_ENVIRONMENT overrides the path for testing.
+if [[ -f ${_RP_ENVIRONMENT:=/etc/rp_environment} ]]; then
+    _path=$PATH
+    source "$_RP_ENVIRONMENT"
+    PATH=$_path
+    unset _path
 fi
+unset _RP_ENVIRONMENT
 
 # Configure git over HTTPS using gh-resolved GITHUB_TOKEN
 if command -v gh >/dev/null 2>&1 && [[ -n ${GITHUB_TOKEN:-} ]]; then
