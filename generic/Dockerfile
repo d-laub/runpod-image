@@ -39,6 +39,11 @@ RUN DLAUB_TOGO_REF="${DLAUB_TOGO_REF}" bash /tmp/setup_bash.sh \
 # and job runner entry point that uses bash -l / bash --login.
 COPY cgroup-threads.sh /etc/profile.d/cgroup-threads.sh
 
+# Kills shells/zellij clients left by disconnected `kubectl exec` sessions;
+# run from .bashrc on each new exec login (see extend-bashrc.sh).
+COPY reap-stale-exec.sh /usr/local/bin/reap-stale-exec
+RUN chmod 0755 /usr/local/bin/reap-stale-exec
+
 # Append runtime secret/git glue to /root/.bashrc.
 COPY extend-bashrc.sh /tmp/extend-bashrc.sh
 RUN cat /tmp/extend-bashrc.sh >> /root/.bashrc && rm /tmp/extend-bashrc.sh
