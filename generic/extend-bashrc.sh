@@ -74,3 +74,11 @@ fi
 # Covers interactive non-login shells; login shells get it via /etc/profile.d/.
 # shellcheck source=/etc/profile.d/cgroup-threads.sh
 source /etc/profile.d/cgroup-threads.sh
+
+# A disconnected `kubectl exec -- bash` never gets SIGHUP (kubelet keeps the pty
+# open), so its shell and zellij client linger as stale clients forever. Only
+# one terminal is ever live, so a new exec login (parent PID 0, outside the
+# container's pid namespace) reaps the older ones. Never runs in zellij panes.
+if [[ $- == *i* && $PPID == 0 && -z ${ZELLIJ:-} && -x /usr/local/bin/reap-stale-exec ]]; then
+    /usr/local/bin/reap-stale-exec "$$"
+fi
