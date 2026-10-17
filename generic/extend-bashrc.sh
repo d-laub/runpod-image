@@ -6,6 +6,9 @@
 # so restore PATH afterwards: the bare container PATH would otherwise drop the
 # ~/.local/bin (claude) and other entries .bashrc added above.
 # _RP_ENVIRONMENT overrides the path for testing.
+# /start.sh appends a bare, PATH-clobbering `source /etc/rp_environment` on boot
+# unless .bashrc already contains that text; the next line is it, as a marker.
+# source /etc/rp_environment
 if [[ -f ${_RP_ENVIRONMENT:=/etc/rp_environment} ]]; then
     _path=$PATH
     source "$_RP_ENVIRONMENT"

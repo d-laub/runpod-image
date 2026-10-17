@@ -57,3 +57,15 @@ _run() {
     [ "$(wc -l < "$TMPD/runs")" -eq 1 ]
     ! grep -q 'cannot overwrite' "$TMPD/stderr"
 }
+
+# The base image's /start.sh appends a bare `source /etc/rp_environment` to
+# .bashrc on every boot unless that exact text is already there. Appended after
+# this script, it re-clobbers PATH (drops ~/.local/bin, so `claude` vanishes).
+@test "base image /start.sh sees rp_environment as already sourced" {
+    cp "$SCRIPT" "$TMPD/.bashrc"
+    HOME="$TMPD" bash -c '
+        if ! grep -q "source /etc/rp_environment" ~/.bashrc; then
+            echo "source /etc/rp_environment" >> ~/.bashrc
+        fi'
+    cmp -s "$SCRIPT" "$TMPD/.bashrc"
+}
