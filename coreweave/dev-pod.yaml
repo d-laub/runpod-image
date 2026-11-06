@@ -4,7 +4,7 @@
 # is set, so the Secret below wires git/rclone/aws/wandb exactly as RunPod
 # template secrets do.
 #
-#   kubectl apply -f coreweave/workspace-pvc.yaml -f coreweave/dev-pod.yaml
+#   kubectl apply -k coreweave/
 #   kubectl exec -it dev -- bash
 apiVersion: v1
 kind: Pod
@@ -18,6 +18,13 @@ spec:
     - name: dev
       image: ghcr.io/d-laub/runpod-image:gpu
       imagePullPolicy: Always
+      # disk-guard.sh pauses work before a full node disk gets the pod evicted
+      # (see the script). Restarted if it dies; /start.sh stays the main process.
+      # `args` replaces only the image's Cmd, keeping nvidia_entrypoint.sh.
+      args:
+        - /bin/bash
+        - -c
+        - (while :; do bash /opt/disk-guard/disk-guard.sh; sleep 5; done) & exec /start.sh
       # optional: the pod starts without the Secret, with the matching
       # features inert (same contract as RunPod template secrets).
       envFrom:
@@ -38,6 +45,7 @@ spec:
       volumeMounts:
         - { name: workspace, mountPath: /workspace }
         - { name: dshm, mountPath: /dev/shm }
+        - { name: disk-guard, mountPath: /opt/disk-guard }
   volumes:
     - name: workspace
       persistentVolumeClaim: { claimName: workspace }
@@ -45,3 +53,5 @@ spec:
     # container default makes them crash with bus errors.
     - name: dshm
       emptyDir: { medium: Memory, sizeLimit: 64Gi }
+    - name: disk-guard
+      configMap: { name: disk-guard }
