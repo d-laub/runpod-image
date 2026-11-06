@@ -53,6 +53,11 @@ the node is idle (no workloads), not that it is unready.
 When done: `kubectl delete pod dev`. `/workspace` persists; `/root` does not,
 so push your code first. The reserved node bills whether or not the pod runs.
 
+The pod has `CAP_SYS_PTRACE`, so `py-spy dump --pid <pid>` (and `py-spy top`,
+`gdb -p`) work on running processes. Without it the node's
+`kernel.yama.ptrace_scope=1` only allows tracing your own child processes,
+e.g. `py-spy record -- python train.py`.
+
 ## Pod guard
 
 The pod is a bare Pod with `restartPolicy: Never`, so anything that kills the

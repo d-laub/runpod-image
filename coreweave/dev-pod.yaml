@@ -27,6 +27,11 @@ spec:
         - (while :; do bash /opt/pod-guard/pod-guard.sh; sleep 5; done) & exec /start.sh
       # optional: the pod starts without the Secret, with the matching
       # features inert (same contract as RunPod template secrets).
+      # py-spy/gdb on running processes: the node's kernel.yama.ptrace_scope=1
+      # only lets a process trace its own descendants without CAP_SYS_PTRACE.
+      securityContext:
+        capabilities:
+          add: [SYS_PTRACE]
       envFrom:
         - secretRef:
             name: runpod-image-secrets
