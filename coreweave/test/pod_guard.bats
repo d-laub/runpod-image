@@ -1,10 +1,14 @@
 #!/usr/bin/env bats
+# shellcheck disable=SC2030,SC2031  # each @test runs in its own subshell by design
+
+bats_require_minimum_version 1.5.0
 
 # Runs the guard against a fake filesystem (_POD_GUARD_STAT), a fake cgroup
 # (_POD_GUARD_CGROUP) and a fixed PID list (_POD_GUARD_PIDS), so it can only
 # ever pause the test's own victims. Linux only: the guard reads /proc.
 
 SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/pod-guard.sh"
+HOOK="${SCRIPT%/*}/claude-hook.sh"
 
 setup() {
     TMPD="$(mktemp -d)"
@@ -54,6 +58,7 @@ spawn_victim() {
 start_guard() {
     _POD_GUARD_STAT="$TMPD/stat" _POD_GUARD_PIDS="$TMPD/pids" \
         _POD_GUARD_CGROUP="$CG" POD_GUARD_DISKS="/:8:15" \
+        POD_GUARD_STATUS="$TMPD/run/status" _POD_GUARD_CLAUDE_SETTINGS="$TMPD/claude/settings.json" \
         POD_GUARD_INTERVAL=0.1 bash "$SCRIPT" >"$TMPD/log" 2>&1 3>&- &
     GUARD=$!
     sleep 0.3
@@ -181,4 +186,108 @@ wait_state() {
     start_guard
     [ "$(cat "$CG/memory.oom.group")" = 1 ]
     run ! grep -q "watching memory" "$TMPD/log"
+}
+
+# Run the hook for event $1 in session $2.
+hook() {
+    echo "{\"session_id\": \"$2\", \"hook_event_name\": \"$1\"}" |
+        POD_GUARD_STATUS="$TMPD/run/status" bash "$HOOK" "$1"
+}
+
+wait_status() {
+    for _ in $(seq 50); do
+        [[ $(head -n1 "$TMPD/run/status" 2>/dev/null) == "$1 "* ]] && return 0
+        sleep 0.1
+    done
+    cat "$TMPD/log" >&2
+    return 1
+}
+
+@test "status file: written on pause, says resumed after recovery" {
+    v=$(spawn_victim)
+    start_guard
+    [ ! -e "$TMPD/run/status" ]
+    set_free 7
+    wait_status paused
+    grep -q "PAUSED 1 process" "$TMPD/run/status"
+    grep -q "disk / is at 7.00% free" "$TMPD/run/status"
+    set_free 50
+    wait_status resumed
+}
+
+@test "status file: guard exit while paused says resumed" {
+    v=$(spawn_victim)
+    start_guard
+    set_free 7
+    wait_status paused
+    kill "$GUARD"
+    wait "$GUARD" 2>/dev/null || true
+    GUARD=
+    grep -q "^resumed " "$TMPD/run/status"
+}
+
+@test "hook: silent without a status file" {
+    run hook PostToolUse s1
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "hook: shows each event once per session; failed tools always, via stderr" {
+    mkdir -p "$TMPD/run"
+    printf 'paused 100\nthe "message"\n' >"$TMPD/run/status"
+    run hook PostToolUse s1
+    [ "$(python3 -c 'import json,sys; o=json.loads(sys.argv[1])["hookSpecificOutput"]; print(o["hookEventName"], o["additionalContext"])' "$output")" = 'PostToolUse the "message"' ]
+    run hook UserPromptSubmit s1
+    [ -z "$output" ]
+    run -2 --separate-stderr hook PostToolUseFailure s1
+    [ "$stderr" = 'the "message"' ]
+    run hook PostToolUse s2
+    [ -n "$output" ]
+    printf 'resumed 200\nover\n' >"$TMPD/run/status"
+    run hook PostToolUse s1
+    [[ $output == *over* ]]
+}
+
+@test "hook watch: wakes the session (exit 2) when a pause starts, once" {
+    mkdir -p "$TMPD/run"
+    echo '{"session_id": "w1"}' | POD_GUARD_STATUS="$TMPD/run/status" POD_GUARD_WATCH_POLL=0.1 \
+        bash "$HOOK" watch >/dev/null 2>"$TMPD/woke" 3>&- &
+    w=$!
+    sleep 0.3
+    kill -0 "$w" # still waiting
+    printf 'paused 300\nfrozen\n' >"$TMPD/run/status"
+    rc=0
+    wait "$w" || rc=$?
+    [ "$rc" -eq 2 ]
+    [ "$(cat "$TMPD/woke")" = frozen ]
+    run hook PostToolUse w1 # already shown by the watcher
+    [ -z "$output" ]
+}
+
+@test "hook watch: one watcher per session" {
+    mkdir -p "$TMPD/run"
+    echo '{"session_id": "w2"}' | POD_GUARD_STATUS="$TMPD/run/status" \
+        bash "$HOOK" watch >/dev/null 2>&1 3>&- &
+    w=$!
+    sleep 0.3
+    run hook watch w2
+    [ "$status" -eq 0 ]
+    kill "$w"
+}
+
+@test "startup merges the Claude Code hooks into settings, idempotently" {
+    mkdir -p "$TMPD/claude"
+    echo '{"theme": "dark", "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": "mine"}]}]}}' >"$TMPD/claude/settings.json"
+    start_guard
+    kill "$GUARD"
+    wait "$GUARD" 2>/dev/null || true
+    start_guard
+    python3 - "$TMPD/claude/settings.json" <<'EOF'
+import json, sys
+s = json.load(open(sys.argv[1]))
+assert s["theme"] == "dark"
+post = [h["command"] for e in s["hooks"]["PostToolUse"] for h in e["hooks"]]
+assert post[0] == "mine" and len(post) == 2 and post[1].endswith("claude-hook.sh PostToolUse"), post
+assert s["hooks"]["PreToolUse"][0]["hooks"][0]["asyncRewake"] is True
+EOF
 }
