@@ -26,11 +26,13 @@ spec:
             optional: true
       resources:
         # limits only, so requests == limits. Leaves headroom for the node's
-        # daemonsets (~6 CPU, ~20 Gi requested).
+        # daemonsets (~6 CPU, ~20 Gi requested). The node (~1006 Gi) reserves
+        # no memory for the system, so 960Gi let the pod starve the kubelet and
+        # daemons into a node-wide OOM; 900Gi keeps ~100 Gi free for them.
         limits:
           nvidia.com/gpu: 8
           cpu: "120"
-          memory: 960Gi
+          memory: 900Gi
       ports:
         - { name: ssh, containerPort: 22 }
       volumeMounts:
