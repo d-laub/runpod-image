@@ -40,7 +40,7 @@ platform-neutral, so the same image behaves the same on both platforms.
 ## Daily use
 
 ```bash
-kubectl apply -k coreweave/   # PVC, disk-guard ConfigMap, pod
+kubectl apply -k coreweave/   # PVC, pod-guard ConfigMap, pod
 kubectl wait --for=condition=Ready pod/dev --timeout=15m   # first pull is slow
 kubectl exec -it dev -- bash
 ```
@@ -53,24 +53,41 @@ the node is idle (no workloads), not that it is unready.
 When done: `kubectl delete pod dev`. `/workspace` persists; `/root` does not,
 so push your code first. The reserved node bills whether or not the pod runs.
 
-## Disk guard
+## Pod guard
 
-`/root`, `/tmp` and everything else outside `/workspace` live on the node's
-local disk (~7 TiB) with no quota. If that disk drops below 5% free, the
-kubelet evicts the pod and `/root` is gone. An `ephemeral-storage` limit
-wouldn't help, because the kubelet enforces it by evicting too.
+The pod is a bare Pod with `restartPolicy: Never`, so anything that kills the
+container loses `/root`. Two things can, and Kubernetes limits can't stop them,
+because the limits are what do the killing:
 
-[`disk-guard.sh`](disk-guard.sh) runs inside the pod and checks free space every
-2 s. Below 8% free it SIGSTOPs running jobs (it does not kill them) and
-prints a warning to every terminal. Shells, sshd, tmux, editor servers and
-Claude Code keep running, and so do commands you start after the pause, so you
-can clean up. When free space is back at 15%, the jobs continue. If free space
-keeps falling while paused, the guard pauses again, catching any new writers.
+- **Disk.** `/root`, `/tmp` and everything else outside `/workspace` live on
+  the node's local disk (~7 TiB) with no quota. Below 5% free, the kubelet
+  evicts the pod. An `ephemeral-storage` limit would evict it too.
+- **Memory.** At the 900Gi limit, the kernel OOM-kills. Kubernetes sets
+  `memory.oom.group=1`, so every process dies, PID 1 included.
 
-- See what it did: `kubectl logs dev | grep disk-guard`
-- Find what's big: `du -xh -d2 / | sort -h | tail`
+[`pod-guard.sh`](pod-guard.sh) runs inside the pod and handles both:
+
+- At startup it sets `memory.oom.group=0`, so an OOM kills one process
+  instead of the whole pod. It also sets `memory.high` 2% below the limit,
+  where the kernel slows allocations down instead of killing anything.
+- Every 0.5 s it checks free space on `/` (pauses below 8%, resumes at 15%),
+  free space on `/workspace` (5% / 8%), and memory headroom (7% / 12%).
+  Memory headroom excludes page cache, because the kernel can free that.
+- When a check trips, it SIGSTOPs running jobs (it doesn't kill them) and warns
+  every terminal. Shells, sshd, tmux, editor servers and Claude Code keep
+  running, and so do commands you start after the pause, so you can clean
+  up: delete files, or for memory, kill one of the paused jobs the warning
+  names. Once the tripped resource recovers, the jobs continue. If it keeps
+  falling while paused, the guard pauses again, catching any new jobs.
+
+`/dev/shm` is sized to the memory limit. It counts against memory, and it
+fills at 25 GiB/s, faster than any polling could catch a smaller tmpfs.
+
+- See what it did: `kubectl logs dev | grep pod-guard`
 - Distributed jobs: NCCL collectives can time out when they resume after a
   long pause.
+- Not covered: CoreWeave draining or rebooting the node (maintenance, GPU
+  faults). Push code and keep checkpoints on `/workspace`.
 
 ## SSH (VS Code / Zed Remote-SSH)
 
