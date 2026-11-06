@@ -6,8 +6,8 @@ resources:
   - workspace-pvc.yaml
   - dev-pod.yaml
 configMapGenerator:
-  - name: disk-guard
-    files: [disk-guard.sh]
+  - name: pod-guard
+    files: [pod-guard.sh]
 generatorOptions:
   # A fixed name keeps the Pod spec unchanged when only the script changes.
   disableNameSuffixHash: true

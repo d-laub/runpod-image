@@ -18,13 +18,13 @@ spec:
     - name: dev
       image: ghcr.io/d-laub/runpod-image:gpu
       imagePullPolicy: Always
-      # disk-guard.sh pauses work before a full node disk gets the pod evicted
+      # pod-guard.sh pauses work before a full disk or an OOM kills the pod
       # (see the script). Restarted if it dies; /start.sh stays the main process.
       # `args` replaces only the image's Cmd, keeping nvidia_entrypoint.sh.
       args:
         - /bin/bash
         - -c
-        - (while :; do bash /opt/disk-guard/disk-guard.sh; sleep 5; done) & exec /start.sh
+        - (while :; do bash /opt/pod-guard/pod-guard.sh; sleep 5; done) & exec /start.sh
       # optional: the pod starts without the Secret, with the matching
       # features inert (same contract as RunPod template secrets).
       envFrom:
@@ -45,13 +45,16 @@ spec:
       volumeMounts:
         - { name: workspace, mountPath: /workspace }
         - { name: dshm, mountPath: /dev/shm }
-        - { name: disk-guard, mountPath: /opt/disk-guard }
+        - { name: pod-guard, mountPath: /opt/pod-guard }
   volumes:
     - name: workspace
       persistentVolumeClaim: { claimName: workspace }
     # PyTorch DataLoader workers pass batches through /dev/shm; the 64 Mi
-    # container default makes them crash with bus errors.
+    # container default makes them crash with bus errors. Sized to the memory
+    # limit, which it counts against: writes reach 25 GiB/s, too fast for
+    # pod-guard to catch a smaller tmpfs filling, but its memory check covers
+    # shm at any size.
     - name: dshm
-      emptyDir: { medium: Memory, sizeLimit: 64Gi }
-    - name: disk-guard
-      configMap: { name: disk-guard }
+      emptyDir: { medium: Memory, sizeLimit: 900Gi }
+    - name: pod-guard
+      configMap: { name: pod-guard }
