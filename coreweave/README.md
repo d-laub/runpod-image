@@ -80,6 +80,18 @@ because the limits are what do the killing:
   names. Once the tripped resource recovers, the jobs continue. If it keeps
   falling while paused, the guard pauses again, catching any new jobs.
 
+How you and agents hear about it:
+
+- **Claude Code agents on the pod.** The guard writes `/run/pod-guard/status`
+  and, at startup, merges hooks into `/root/.claude/settings.json` that put it
+  into every session's context: at session start, on each prompt, after each
+  tool call, and always after a failed one. A pause that starts while an
+  agent's command is running (or frozen) wakes the agent at once through an
+  async `asyncRewake` hook. The hooks go in user settings because accounts
+  with remote managed settings ignore `/etc/claude-code`.
+- **Terminals.** Only terminals sitting at a shell prompt get the message, so
+  full-screen apps like Claude Code's TUI aren't drawn over.
+
 `/dev/shm` is sized to the memory limit. It counts against memory, and it
 fills at 25 GiB/s, faster than any polling could catch a smaller tmpfs.
 

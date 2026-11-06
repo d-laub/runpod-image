@@ -20,6 +20,13 @@
 # SIGCONTs exactly what it stopped. Nothing is killed. /workspace is watched
 # too: filling it doesn't kill the pod, but it crashes the jobs writing to it.
 #
+# Agents and people are told through two channels. The status file
+# (POD_GUARD_STATUS, /run/pod-guard/status) holds the current pause or the
+# last resume; at startup the guard installs claude-hook.sh (next to this
+# script) into the Claude Code user settings, which feeds it into every
+# session on the pod and wakes agents whose commands the pause froze. Terminals sitting at a shell prompt also get a message; full-screen
+# apps (Claude Code's TUI, vim) are skipped so they aren't drawn over.
+#
 # Spared, so you can still log in and clean up: PID 1, sshd, shells,
 # tmux/screen, editor remote servers, pagers/editors/monitors, and Claude Code.
 # Commands started after the pause (rm, dvc gc, kill) run normally; only if a
@@ -42,7 +49,8 @@
 #   POD_GUARD_STEP_PCT (1)  pause again after this much further loss.
 #   POD_GUARD_INTERVAL (0.5)  seconds between checks.
 #
-# Test hooks: _POD_GUARD_STAT (file holding `stat -f -c '%a %b %d %c'` output,
+# Test hooks: _POD_GUARD_CLAUDE_SETTINGS (Claude Code settings file),
+# _POD_GUARD_STAT (file holding `stat -f -c '%a %b %d %c'` output,
 # used for every disk), _POD_GUARD_CGROUP (cgroup directory, default
 # /sys/fs/cgroup) and _POD_GUARD_PIDS (file listing the only PIDs that may be
 # paused, so tests can't freeze the host).
@@ -53,7 +61,12 @@ step_pct=${POD_GUARD_STEP_PCT:-1}
 interval=${POD_GUARD_INTERVAL:-0.5}
 high_pct=${POD_GUARD_MEM_HIGH_PCT:-2}
 cgroup=${_POD_GUARD_CGROUP:-/sys/fs/cgroup}
-nag_every=300
+status=${POD_GUARD_STATUS:-/run/pod-guard/status}
+nag_every=300     # seconds between terminal reminders while paused
+refresh_every=10  # seconds between status file refreshes while paused
+resumed_ttl=600   # seconds a "resumed" status stays up for agents to see
+claude_settings=${_POD_GUARD_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}
+hook="$(cd "${BASH_SOURCE[0]%/*}" && pwd)/claude-hook.sh"
 
 spared_comm='^(bash|sh|dash|zsh|fish|sshd|sshd-session|tmux.*|screen|SCREEN|sleep|claude|less|vim|nvim|top|htop|btop|nvtop|watch)$'
 spared_exe='/\.(vscode-server|cursor-server|zed_server)/|zed-remote-server'
@@ -110,6 +123,40 @@ setup_memcg() {
     else
         log "memory: cgroup is read-only; an OOM will still kill the whole pod"
     fi
+}
+
+# Merged into the user settings, which reload live in running sessions.
+# (A managed-settings drop-in would be cleaner, but accounts with remote
+# managed settings skip local managed files.) Re-running replaces our entries,
+# leaving the rest of the file alone.
+install_claude_hooks() {
+    [[ -f $hook ]] || return
+    python3 - "$claude_settings" "bash $hook" <<'EOF' || return
+import json, os, sys
+path, h = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        settings = json.load(f)
+except FileNotFoundError:
+    settings = {}
+cmd = lambda event, **kw: {"hooks": [{"type": "command", "command": f"{h} {event}", **kw}]}
+ours = {
+    "SessionStart": cmd("SessionStart"),
+    "UserPromptSubmit": cmd("UserPromptSubmit"),
+    "PostToolUse": cmd("PostToolUse"),
+    "PostToolUseFailure": cmd("PostToolUseFailure"),
+    "PreToolUse": {"matcher": "Bash", **cmd("watch", **{"async": True, "asyncRewake": True})},
+}
+hooks = settings.setdefault("hooks", {})
+for event, entry in ours.items():
+    kept = [e for e in hooks.get(event, []) if not any("claude-hook.sh" in x.get("command", "") for x in e.get("hooks", []))]
+    hooks[event] = kept + [entry]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path + ".pod-guard.tmp", "w") as f:
+    json.dump(settings, f, indent=2)
+os.replace(path + ".pod-guard.tmp", path)
+EOF
+    log "Claude Code hooks installed in $claude_settings"
 }
 
 declare -A stopped=() # pid -> start time, so a recycled PID is never resumed
@@ -170,11 +217,24 @@ biggest_paused() {
     done | sort -rn | head -3 | awk '{printf "%s%s (%s, %d GiB)", sep, $2, $3, $1 / 1048576; sep = ", "}'
 }
 
-# Message every terminal; a stuck tty must not block the guard.
+# Terminals whose foreground process is a shell, i.e. sitting at a prompt.
+shell_ttys() {
+    local d stat f tty
+    for d in /proc/[0-9]*; do
+        { stat=$(<"$d/stat"); } 2>/dev/null || continue
+        # tty_nr and tpgid: the foreground group leader of a terminal.
+        read -ra f <<<"${stat##*) }"
+        ((f[4] != 0 && f[5] == ${d#/proc/})) || continue
+        [[ ${stat#*(} =~ ^(bash|zsh|sh|dash|fish)\) ]] || continue
+        tty=$(readlink "$d/fd/0" 2>/dev/null) && [[ $tty == /dev/pts/* ]] && echo "$tty"
+    done | sort -u
+}
+
+# Message every terminal at a prompt; a stuck tty must not block the guard.
 broadcast() {
     local tty
     log "$1"
-    for tty in /dev/pts/[0-9]*; do
+    for tty in $(shell_ttys); do
         # shellcheck disable=SC2016  # expanded by the inner bash
         timeout 1 bash -c 'printf "\r\n\a*** pod-guard: %s ***\r\n" "$1" >"$2"' _ "$1" "$tty" 2>/dev/null
     done
@@ -195,17 +255,33 @@ advice() {
     echo "$msg"
 }
 
-trap resume_work EXIT
+# Status file: first line is "<state> <epoch>" (one key per event, so the hook
+# shows each event once per session), the rest is the message for agents.
+write_status() {
+    mkdir -p "${status%/*}" && printf '%s %s\n%s\n' "$1" "$2" "$3" >"$status.tmp" && mv "$status.tmp" "$status"
+}
+
+paused_status() {
+    write_status paused "$paused_at" "pod-guard (automated pod monitor): at $(date -ud "@$paused_at" +%H:%M) UTC it PAUSED ${#stopped[@]} process(es) with SIGSTOP (not killed) so the pod isn't killed.$(advice) Processes started before the pause are frozen, possibly including commands you launched, which would then hang until they time out. Tell the user about this now. Don't start disk- or memory-heavy work; help free space if the user asks. Paused jobs resume automatically once resources recover."
+}
+
+on_exit() {
+    ((paused)) && write_status resumed "$(date +%s)" "pod-guard: the guard stopped, so the pause from $(date -ud "@$paused_at" +%H:%M) UTC is over and paused jobs were resumed."
+    resume_work
+}
+
+trap on_exit EXIT
 trap exit INT TERM
 
 setup_memcg
+install_claude_hooks
 for i in "${!names[@]}"; do
     log "watching ${names[$i]}: pause below $((pause_bp[i] / 100))% free, resume at $((resume_bp[i] / 100))%"
 done
 
 declare -A tripped=() low=()
 hr=()
-paused=0 nagged=0 step_bp=$((step_pct * 100))
+paused=0 paused_at=0 nagged=0 refreshed=0 step_bp=$((step_pct * 100))
 while :; do
     pause=0
     for i in "${!names[@]}"; do
@@ -218,15 +294,23 @@ while :; do
     done
     if ((pause)); then
         pause_work
-        paused=1 nagged=$((SECONDS - nag_every))
+        ((paused)) || paused_at=$(date +%s)
+        paused=1 nagged=$((SECONDS - nag_every)) refreshed=$((SECONDS - refresh_every))
     elif ((paused)); then
         ok=1
         for i in "${!tripped[@]}"; do ((hr[i] >= resume_bp[i])) || ok=0; done
         if ((ok)); then
             resume_work
             paused=0 tripped=() low=()
+            write_status resumed "$(date +%s)" "pod-guard: resources recovered and the jobs paused at $(date -ud "@$paused_at" +%H:%M) UTC were resumed at $(date -u +%H:%M) UTC. Commands that hung or timed out during the pause may need re-running."
             broadcast "resources recovered, paused jobs resumed"
         fi
+    elif [[ -f $status ]] && (($(date +%s) - $(stat -c %Y "$status") >= resumed_ttl)); then
+        rm -f "$status"
+    fi
+    if ((paused && SECONDS - refreshed >= refresh_every)); then
+        paused_status
+        refreshed=$SECONDS
     fi
     if ((paused && SECONDS - nagged >= nag_every)); then
         broadcast "${#stopped[@]} job(s) PAUSED (SIGSTOP, not killed) to keep the pod alive.$(advice)"
