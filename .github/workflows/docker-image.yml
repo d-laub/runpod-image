@@ -37,7 +37,7 @@ jobs:
           sudo apt-get install -y bats
 
       - name: Run shell test suite
-        run: bats --print-output-on-failure generic/test/
+        run: bats --print-output-on-failure generic/test/ coreweave/test/
 
   # Stage 0 — resolve the upstream dlaub-togo commit this build will install,
   # and decide whether a scheduled run has anything to do.

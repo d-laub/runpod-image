@@ -1,0 +1,13 @@
+# Everything for the dev pod, in one apply:
+#   kubectl apply -k coreweave/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - workspace-pvc.yaml
+  - dev-pod.yaml
+configMapGenerator:
+  - name: disk-guard
+    files: [disk-guard.sh]
+generatorOptions:
+  # A fixed name keeps the Pod spec unchanged when only the script changes.
+  disableNameSuffixHash: true

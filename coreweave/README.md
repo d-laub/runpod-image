@@ -37,16 +37,10 @@ platform-neutral, so the same image behaves the same on both platforms.
 
    To change it later, delete and recreate it, then recreate the pod.
 
-3. Create the volume:
-
-   ```bash
-   kubectl apply -f coreweave/workspace-pvc.yaml
-   ```
-
 ## Daily use
 
 ```bash
-kubectl apply -f coreweave/dev-pod.yaml
+kubectl apply -k coreweave/   # PVC, disk-guard ConfigMap, pod
 kubectl wait --for=condition=Ready pod/dev --timeout=15m   # first pull is slow
 kubectl exec -it dev -- bash
 ```
@@ -58,6 +52,25 @@ the node is idle (no workloads), not that it is unready.
 
 When done: `kubectl delete pod dev`. `/workspace` persists; `/root` does not,
 so push your code first. The reserved node bills whether or not the pod runs.
+
+## Disk guard
+
+`/root`, `/tmp` and everything else outside `/workspace` live on the node's
+local disk (~7 TiB) with no quota. If that disk drops below 5% free, the
+kubelet evicts the pod and `/root` is gone. An `ephemeral-storage` limit
+wouldn't help, because the kubelet enforces it by evicting too.
+
+[`disk-guard.sh`](disk-guard.sh) runs inside the pod and checks free space every
+2 s. Below 8% free it SIGSTOPs running jobs (it does not kill them) and
+prints a warning to every terminal. Shells, sshd, tmux, editor servers and
+Claude Code keep running, and so do commands you start after the pause, so you
+can clean up. When free space is back at 15%, the jobs continue. If free space
+keeps falling while paused, the guard pauses again, catching any new writers.
+
+- See what it did: `kubectl logs dev | grep disk-guard`
+- Find what's big: `du -xh -d2 / | sort -h | tail`
+- Distributed jobs: NCCL collectives can time out when they resume after a
+  long pause.
 
 ## SSH (VS Code / Zed Remote-SSH)
 
