@@ -8,8 +8,11 @@ SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/disk-guard.sh"
 
 setup() {
     TMPD="$(mktemp -d)"
-    # A copy of sleep with a comm the guard does not spare.
-    cp "$(command -v sleep)" "$TMPD/victim"
+    # Victims are bash scripts blocking on a FIFO read, so their comm is the
+    # script name and they need no external binary (copying `sleep` breaks on
+    # multicall coreutils, which dispatch on the program name).
+    mkfifo "$TMPD/fifo"
+    make_sleeper "$TMPD/victim"
     : >"$TMPD/pids"
     set_free 50
 }
@@ -19,6 +22,11 @@ teardown() {
     pkill -CONT -f "$TMPD/victim" 2>/dev/null
     pkill -f "$TMPD/victim" 2>/dev/null
     rm -rf "$TMPD"
+}
+
+make_sleeper() {
+    printf '#!/bin/bash\nread -rt 1000 <>"%s"\n' "$TMPD/fifo" >"$1"
+    chmod +x "$1"
 }
 
 # Free space as a whole percent of 10000 blocks; inodes plentiful.
@@ -41,8 +49,7 @@ state() { awk '{print $3}' "/proc/$1/stat"; }
 
 # Poll for a process state instead of sleeping a fixed time.
 wait_state() {
-    local i
-    for i in $(seq 50); do
+    for _ in $(seq 50); do
         [[ $(state "$1") == "$2" ]] && return 0
         sleep 0.1
     done
@@ -98,7 +105,7 @@ wait_state() {
 
 @test "spared comm (bash) is never paused" {
     mkdir "$TMPD/spared"
-    cp "$(command -v sleep)" "$TMPD/spared/bash"
+    make_sleeper "$TMPD/spared/bash"
     "$TMPD/spared/bash" 1000 >/dev/null 2>&1 3>&- &
     sh_pid=$!
     echo "$sh_pid" >>"$TMPD/pids"
