@@ -14,14 +14,19 @@
 #                            ends. One watcher per session, kept alive while the
 #                            session keeps running Bash.
 #
-# Hook input JSON arrives on stdin; only session_id is used.
+# Hook input JSON arrives on stdin; session_id and (inside a subagent) agent_id are used.
+# Subagents share their parent's session_id, so state is kept per agent: otherwise the first
+# agent to fire a hook claims the event and every other agent in the session never sees it.
 
 status=${POD_GUARD_STATUS:-/run/pod-guard/status}
 watch_idle=${POD_GUARD_WATCH_IDLE:-3600} # seconds without Bash calls before a watcher exits
 poll=${POD_GUARD_WATCH_POLL:-2}
 
-session=$(sed -n 's/.*"session_id" *: *"\([^"]*\)".*/\1/p' | head -n1)
-state="${status%/*}/sessions/${session:-unknown}"
+input=$(cat)
+field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" <<<"$input" | head -n1; }
+session=$(field session_id)
+agent=$(field agent_id)
+state="${status%/*}/sessions/${session:-unknown}${agent:+/agents/$agent}"
 mkdir -p "$state" 2>/dev/null || exit 0
 
 key() { head -n1 "$status" 2>/dev/null; }
