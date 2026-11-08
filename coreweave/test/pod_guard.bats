@@ -248,6 +248,38 @@ wait_status() {
     [[ $output == *over* ]]
 }
 
+@test "hook: subagents sharing a session each see the event once" {
+    mkdir -p "$TMPD/run"
+    printf 'paused 150\nshared\n' >"$TMPD/run/status"
+    agent() {
+        echo "{\"session_id\": \"s3\", \"agent_id\": \"$1\", \"hook_event_name\": \"PostToolUse\"}" |
+            POD_GUARD_STATUS="$TMPD/run/status" bash "$HOOK" PostToolUse
+    }
+    run hook PostToolUse s3 # main thread claims it
+    [ -n "$output" ]
+    run agent a1
+    [[ $output == *shared* ]]
+    run agent a2
+    [[ $output == *shared* ]]
+    run agent a1
+    [ -z "$output" ]
+    run hook PostToolUse s3
+    [ -z "$output" ]
+}
+
+@test "hook watch: one watcher per agent, each woken by a pause" {
+    mkdir -p "$TMPD/run"
+    for a in x1 x2; do
+        echo "{\"session_id\": \"s4\", \"agent_id\": \"$a\"}" | POD_GUARD_STATUS="$TMPD/run/status" \
+            POD_GUARD_WATCH_POLL=0.1 bash "$HOOK" watch >/dev/null 2>"$TMPD/woke_$a" 3>&- &
+    done
+    sleep 0.3
+    printf 'paused 400\nboth\n' >"$TMPD/run/status"
+    wait
+    [ "$(cat "$TMPD/woke_x1")" = both ]
+    [ "$(cat "$TMPD/woke_x2")" = both ]
+}
+
 @test "hook watch: wakes the session (exit 2) when a pause starts, once" {
     mkdir -p "$TMPD/run"
     echo '{"session_id": "w1"}' | POD_GUARD_STATUS="$TMPD/run/status" POD_GUARD_WATCH_POLL=0.1 \
