@@ -20,7 +20,12 @@ set -euo pipefail
 R2_REMOTE="${R2_REMOTE:-r2-scratch:smb-data-prod-scratch}"
 VM_REPO_DIR="${VM_REPO_DIR:-/root/gvf-germ-som}"
 DATA_VOL="${DATA_VOL:-/workspace/gvf-germ-som}"   # persistent volume root
-DVC_CACHE="${DATA_VOL}/dvc-cache"
+# This flavor deliberately keeps its DVC cache on the volume, with
+# cache.type=symlink so the bytes exist exactly once (no per-checkout copies) and
+# a pod restart doesn't re-pull the dataset. That is the one defensible volume
+# cache; it is not the general pattern (see generic/CLAUDE.md). Override to the
+# ephemeral disk with DVC_CACHE=/root/dvc-cache if the volume is tight.
+DVC_CACHE="${DVC_CACHE:-${DATA_VOL}/dvc-cache}"
 GITHUB_REPO='d-laub/gvf-germ-som'
 
 log() { printf '[bootstrap-gvf] %s\n' "$*" >&2; }
