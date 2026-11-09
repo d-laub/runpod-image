@@ -8,6 +8,12 @@ platform-neutral, so the same image behaves the same on both platforms.
 |-----------------------------|-------------------------------------------------|
 | Template secrets            | Secret `runpod-image-secrets` (`envFrom`)       |
 | Network volume `/workspace` | PVC `workspace` (`shared-vast`) at `/workspace` |
+
+`/workspace` is for data with no other copy. The DVC cache belongs on the
+ephemeral `/root` (the DVC remote is the durable store), and so do project
+checkouts, worktrees and pixi envs — see
+[`generic/CLAUDE.md`](../generic/CLAUDE.md#large-data-only-when-a-volume-is-attached).
+
 | Web terminal / SSH          | `kubectl exec`, or SSH over `kubectl port-forward` |
 | Ephemeral `/root`           | Ephemeral `/root` (unchanged)                   |
 
@@ -104,7 +110,9 @@ fills at 25 GiB/s, faster than any polling could catch a smaller tmpfs.
 - Distributed jobs: NCCL collectives can time out when they resume after a
   long pause.
 - Not covered: CoreWeave draining or rebooting the node (maintenance, GPU
-  faults). Push code and keep checkpoints on `/workspace`.
+  faults). Push code; keep checkpoints (which have no other copy) on
+  `/workspace`, but not the DVC cache or a checkout — those come back from the
+  DVC remote and from git.
 
 ## SSH (VS Code / Zed Remote-SSH)
 
