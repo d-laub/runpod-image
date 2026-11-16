@@ -18,6 +18,18 @@ Understand the filesystem model before you store anything.
   `/root/.pixi`, rattler cache, cargo). They are rebuildable — never try to
   persist or back them up.
 
+## GPUs: locks only
+
+- **GPU arbitration is the flock in `/root/.locks/` and nothing else.** Hold
+  `/root/.locks/gpuN` for the whole lifetime of any job that uses GPU N, e.g.
+  `flock /root/.locks/gpu3 env CUDA_VISIBLE_DEVICES=3 python train.py`. A held
+  lock means busy; a free lock means the card is yours. No GPU is reserved by number.
+- **Pin the card on the launch line** with `CUDA_VISIBLE_DEVICES=N`. Don't pick
+  cards by nvidia-smi memory or utilisation heuristics, and don't run on a card
+  without holding its lock — other sessions trust the lock alone.
+- `/root/.locks` is on ephemeral `/root`; the image creates it. Lock files are
+  empty and created by `flock` on first use.
+
 ## Large data (only when a volume is attached)
 
 Some pods attach a **volume at `/workspace`** (a RunPod network volume, or a
