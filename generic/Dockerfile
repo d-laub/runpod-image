@@ -52,6 +52,9 @@ RUN cat /tmp/extend-bashrc.sh >> /root/.bashrc && rm /tmp/extend-bashrc.sh
 # volume-only-for-data filesystem pattern, so pod work follows it.
 COPY CLAUDE.md /root/.claude/CLAUDE.md
 
+# GPU arbitration is flock on /root/.locks/gpuN (see CLAUDE.md "GPUs: locks only").
+RUN mkdir -p /root/.locks
+
 # SSH pubkey auth needs no special handling: HOME is the default /root, so
 # RunPod's setup_ssh writes $PUBLIC_KEY (one key per line) to /root/.ssh/
 # authorized_keys on the container fs, where perms satisfy sshd's StrictModes.
